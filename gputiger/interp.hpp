@@ -8,6 +8,8 @@
 #ifndef GPUTIGER_INTERP_HPP_
 #define GPUTIGER_INTERP_HPP_
 
+#include <gputiger/vector.hpp>
+
 template<class T>
 struct interp_functor {
 	vector<T> values;
@@ -34,8 +36,6 @@ struct interp_functor {
 		T x = (loga - i1 * dloga - minloga) / dloga;
 		return c0 + c1 * x + c2 * x * x + c3 * x * x * x;
 	}
-	template<class V>
-	friend interp_functor<V> build_interpolation_function(const vector<V> values, V amin, V amax);
 };
 
 

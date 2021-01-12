@@ -1,26 +1,41 @@
+
+#include <thrust/complex.h>
+
+using cmplx = thrust::complex<float>;
+
+struct arena_t {
+	cmplx* rands;
+	cmplx* four;
+};
+
+__device__ arena_t arena;
+
 #include <nvfunctional>
 #include <gputiger/chemistry.hpp>
 #include <gputiger/options.hpp>
 #include <gputiger/constants.hpp>
 #include <gputiger/util.hpp>
 #include <gputiger/zero_order.hpp>
+#include <gputiger/boltzmann.hpp>
+#include <gputiger/zeldovich.hpp>
 
 #define BLOCK_SIZE 256
 
-__device__ vector<float> *karray_ptr;
-
 __device__ zero_order_universe *zeroverse_ptr;
 
-using eb_results_type = vector<array<nvstd::function<float(float)>, NFIELD>>;
-
-__device__ eb_results_type *eb_results_ptr;
+__device__ interp_functor<float>* power_interp_ptr;
 
 __global__
-void main_kernel(cosmic_parameters opts) {
+void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	const int thread = threadIdx.x;
+	if (thread == 0) {
+		arena = arena_;
+	}
+	__syncthreads();
 	const int block_size = blockDim.x;
 	__shared__
 	double *result_ptr;
+	__shared__
 	sigma8_integrand *func_ptr;
 	if (thread == 0) {
 		zeroverse_ptr = new zero_order_universe;
@@ -34,7 +49,7 @@ void main_kernel(cosmic_parameters opts) {
 		func_ptr = new sigma8_integrand;
 		func_ptr->uni = zeroverse_ptr;
 		integrate<sigma8_integrand, double> <<<1, BLOCK_SIZE>>>(func_ptr,
-				LOG(0.25 / 16), LOG(0.25 * 16), result_ptr, 1.0e-6);
+				LOG(0.25 / 16.0), LOG(0.25 * 16.0), result_ptr, 1.0e-6);
 		CUDA_CHECK(cudaDeviceSynchronize());
 		*result_ptr = SQRT(1.0 / *result_ptr);
 		printf("The normalization value is %e\n", *result_ptr * pow(opts.sigma8, 2));
@@ -44,8 +59,9 @@ void main_kernel(cosmic_parameters opts) {
 		printf("Computing start time for non-linear evolution\n");
 	}
 	float normalization = *result_ptr;
-	float kmax = (float) 2.0 * (float) M_PI / opts.box_size;
+	float kmax = (float) M_PI / opts.box_size;
 	float kmin = kmax / (float) (opts.Ngrid / 2);
+	kmax *= SQRT(3);
 	if (thread == 0) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
@@ -55,12 +71,35 @@ void main_kernel(cosmic_parameters opts) {
 	if (thread == 0) {
 		printf("Non-linear evolution starts at redshift = %e\n", (float) 1 / time - (float) 1);
 	}
-
 	__syncthreads();
+	auto tmp = compute_einstein_boltzmann_interpolation_function(zeroverse_ptr, kmin, kmax, normalization, time);
+	if (thread == 0) {
+		power_interp_ptr = new interp_functor<float>;
+		*power_interp_ptr = tmp;
+	}
+	__syncthreads();
+	auto& pfunc = *power_interp_ptr;
+	if (thread == 0) {
+		printf("Normalized spectrum in range for simulation\n");
+		for (double k = kmin; k < kmax; k *= pow(kmax / kmin, 1.0 / 25.0)) {
+			printf("%e %e\n", k, pfunc(k));
+		}
+		printf("\n");
+	}
+	__syncthreads();
+	if( thread == 0 ) {
+		printf( "Generating density Fourier transform\n");
+	}
+	density_transform( pfunc, opts.box_size, opts.Ngrid);
+	__syncthreads();
+	if( thread == 0 ) {
+		printf( "Transforming density to real space\n");
+	}
 	if (thread == 0) {
 		delete zeroverse_ptr;
 		delete result_ptr;
 		delete func_ptr;
+		delete power_interp_ptr;
 	}
 }
 
@@ -68,12 +107,12 @@ int main() {
 
 	cosmic_parameters params;
 
-//	size_t stack_size;
-//	size_t desired_stack_size = 4 * 1024;
-//	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitStackSize, desired_stack_size));
-//	CUDA_CHECK(cudaDeviceGetLimit(&stack_size, cudaLimitStackSize));
+	size_t stack_size;
+	size_t desired_stack_size = 4 * 1024;
+	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitStackSize, desired_stack_size));
+	CUDA_CHECK(cudaDeviceGetLimit(&stack_size, cudaLimitStackSize));
 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
-//	printf("Stack Size = %li\n", stack_size);
+	printf("Stack Size = %li\n", stack_size);
 	params.h = 0.7;
 	params.Neff = 3.086;
 	params.Y = 0.24;
@@ -88,8 +127,12 @@ int main() {
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);
 	params.omega_nu = omega_r * params.Neff / (8.0 / 7.0 * std::pow(11.0 / 4.0, 4.0 / 3.0) + params.Neff);
 	params.omega_gam = omega_r - params.omega_nu;
+	arena_t arena;
+	const int N = params.Ngrid;
+	CUDA_CHECK(cudaMalloc(&arena.rands, sizeof(cmplx) * N * N * N / 2));
+	CUDA_CHECK(cudaMalloc(&arena.four, sizeof(cmplx) * N * N * N / 2));
 
-	main_kernel<<<1, BLOCK_SIZE>>>(params);
+	main_kernel<<<1, BLOCK_SIZE>>>(arena, params);
 
 	CUDA_CHECK(cudaDeviceSynchronize());
 }

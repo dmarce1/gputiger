@@ -8,37 +8,35 @@
 #ifndef GPUTIGER_VECTOR_HPP_
 #define GPUTIGER_VECTOR_HPP_
 
+#include <gputiger/params.hpp>
 #include <cassert>
 
 template<class T, int N>
 class array {
-	T data[N];
-public:__device__
-	T& operator[](int i) {
+	T A[N];
+public:
+	__device__ T& operator[](int i) {
 		assert(i >= 0);
 		assert(i < N);
-		return data[i];
+		return A[i];
 	}
-	__device__
-	T operator[](int i) const {
+	__device__ T operator[](int i) const {
 		assert(i >= 0);
 		assert(i < N);
-		return data[i];
+		return A[i];
 	}
-	__device__
-	array<T, N>& operator=(const array<T, N> &other) {
+	__device__ array<T, N>& operator=(const array<T, N> &other) {
 		for (int i = 0; i < N; i++) {
-			data[i] = other[i];
+			A[i] = other[i];
 		}
 		return *this;
 	}
 	__device__ array<T, N>(const array<T, N> &other) {
 		*this = other;
 	}
-	__device__
-	array<T, N>& operator=(array<T, N> &&other) {
+	__device__ array<T, N>& operator=(array<T, N> &&other) {
 		for (int i = 0; i < N; i++) {
-			data[i] = other[i];
+			A[i] = other[i];
 		}
 		return *this;
 	}
@@ -51,59 +49,62 @@ public:__device__
 
 template<class T>
 class vector {
-	T *data;
+	T *A;
 	size_t sz;
-public:__device__
+public:
+	__device__
 	void resize(size_t new_size) {
-		T *new_ptr = new T[new_size];
-		for (int i = 0; i < min(new_size, sz); i++) {
-			new_ptr[i] = data[i];
+		T* new_ptr;
+		CUDA_CHECK(cudaMalloc(&new_ptr, sizeof(T) * new_size));
+		if( A ) {
+			for (int i = 0; i < min(new_size, sz); i++) {
+				new_ptr[i] = A[i];
+			}
+			cudaFree(A);
 		}
-		delete[] data;
-		data = new_ptr;
+		A = new_ptr;
 		sz = new_size;
 	}
 	__device__ vector() {
-		sz = 1;
-		data = new T[sz];
+		sz = 0;
+		A = nullptr;
 	}
 	__device__ vector(int size_) {
 		sz = size_;
-		data = new T[sz];
+		CUDA_CHECK(cudaMalloc(&A, sizeof(T) * sz));
 	}
-	__device__
-	size_t size() const {
+	__device__ size_t size() const {
 		return sz;
 	}
-	__device__
-	T& operator[](int i) {
+	__device__ T& operator[](int i) {
 		assert(i >= 0);
 		assert(i < sz);
-		return data[i];
+		return A[i];
 	}
-	__device__
-	T operator[](int i) const {
+	__device__ T operator[](int i) const {
 		assert(i >= 0);
 		assert(i < sz);
-		return data[i];
+		return A[i];
 	}
 	__device__ ~vector() {
-		delete[] data;
+		if (A) {
+			cudaFree(A);
+		}
 	}
-	__device__
-	vector<T>& operator=(const vector<T> &other) {
+	__device__ vector<T>& operator=(const vector<T> &other) {
 		resize(other.size());
 		for (int i = 0; i < other.size(); i++) {
-			data[i] = other.data[i];
+			A[i] = other.A[i];
 		}
 		return *this;
 	}
-	__device__
-	vector<T>& operator=(vector<T> &&other) {
-		delete[] data;
-		data = other.data;
+	__device__ vector<T>& operator=(vector<T> &&other) {
+		if (A) {
+			delete[] A;
+		}
+		A = other.A;
 		sz = other.sz;
-		other.data = new T[1];
+		other.A = nullptr;
 		other.sz = 0;
 		return *this;
 	}
@@ -112,6 +113,38 @@ public:__device__
 	}
 	__device__ vector<T>(vector<T> &&other) {
 		*this = std::move(other);
+	}
+	__device__ T* data() {
+		return A;
+	}
+};
+
+template<class T>
+class vector3d {
+	vector<T> A;
+	int nx, ny, nz;
+	__device__
+	int index(int i, int j, int k) const {
+		return nx * (ny * i + j) + k;
+	}
+public:
+	__device__ vector3d() {
+		nx = ny = nz = 0;
+	}
+	__device__ vector3d(int x, int y, int z) {
+		nx = x;
+		ny = y;
+		nz = z;
+		A.resize(nx * ny * nz);
+	}
+	__device__ T* data() {
+		return A.data();
+	}
+	__device__ T& operator()(int i, int j, int k) {
+		return A[index(i, j, k)];
+	}
+	__device__ T operator()(int i, int j, int k) const {
+		return A[index(i, j, k)];
 	}
 };
 

@@ -11,7 +11,6 @@
 #include <gputiger/vector.hpp>
 #include <gputiger/params.hpp>
 #include <nvfunctional>
-
 #include <cstdio>
 
 __device__
@@ -55,7 +54,7 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 	}
 	__syncthreads();
 	REAL& err = *error_ptr;
-	int N = 6*((block_size-1)/6)+1;
+	int N = 6 * ((block_size - 1) / 6) + 1;
 	REAL sum1, sum2;
 	do {
 		sum1 = REAL(0);
@@ -63,15 +62,12 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 		REAL dx = (b - a) / REAL(N - 1);
 		sum1 = sum2 = 0.0;
 		const REAL wt1[3] = { 6.0 / 8.0, 9.0 / 8.0, 9.0 / 8.0 };
-		const REAL wt2[6] = { 82.0 / 140.0, 216.0 / 140.0, 27.0 / 140.0, 272.0
-				/ 140.0, 27.0 / 140.0, 216.0 / 140.0 };
+		const REAL wt2[6] = { 82.0 / 140.0, 216.0 / 140.0, 27.0 / 140.0, 272.0 / 140.0, 27.0 / 140.0, 216.0 / 140.0 };
 		for (int i = thread; i < N; i += block_size) {
 			REAL x = a + REAL(i) * dx;
 			REAL this_f = f(x);
-			sum2 += this_f * dx* wt2[i%6]
-					* (i==0||i==N-1 ? REAL(0.5) : REAL(1));
-			sum1 += this_f * dx * wt1[i%3]
-					* (i==0||i==N-1 ? REAL(0.5) : REAL(1));
+			sum2 += this_f * dx * wt2[i % 6] * (i == 0 || i == N - 1 ? REAL(0.5) : REAL(1));
+			sum1 += this_f * dx * wt1[i % 3] * (i == 0 || i == N - 1 ? REAL(0.5) : REAL(1));
 		}
 		sums1[thread] = sum1;
 		sums2[thread] = sum2;
@@ -95,6 +91,7 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 			}
 			*result = sum2;
 		}
+		break;
 		N = 2 * (N - 1) + 1;
 		__syncthreads();
 	} while (err > toler);
@@ -106,6 +103,33 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 	}
 	__syncthreads();
 
+}
+
+__device__ cmplx expc(cmplx z) {
+	float x, y;
+	float t = EXP(z.real());
+	SINCOS(z.imag(), &y, &x);
+	x *= t;
+	y *= t;
+	return cmplx(x, y);
+}
+
+__device__
+void generate_random_normals(cmplx* nums, int N) {
+	uint64_t a = 48271;
+	uint64_t mod = 0x7fffffff;
+	const int& thread = threadIdx.x;
+	const int& block_size = blockDim.x;
+	int int1 = (a * (thread + 123)) % mod;
+	int int2 = (a * (thread + 4646)) % mod;
+	for (int i = thread; i < N; i += block_size) {
+		int1 = (int) (((uint64_t) a * (uint64_t) int1) % (uint64_t) mod);
+		int2 = (int) (((uint64_t) a * (uint64_t) int2) % (uint64_t) mod);
+		float x = ((float) int1 + 0.5f) / (float) 0x100000000L;
+		float y = 2.f * (float) M_PI * ((float) int2 + 0.5f) / (float) 0x100000000L;
+		nums[i] = SQRT(-LOG(x)) * expc(cmplx(0, 1) * y);
+	}
+	__syncthreads();
 }
 
 #endif /* GPUTIGER_MATH_HPP_ */

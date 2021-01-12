@@ -10,6 +10,7 @@
 
 #include <gputiger/vector.hpp>
 #include <gputiger/zero_order.hpp>
+#include <gputiger/interp.hpp>
 #include <nvfunctional>
 
 #define LMAX 32
@@ -230,17 +231,15 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 
 		compute_explicit(1);
 
-		den_amplitude = std::abs(Oc * U[deltaci] + Ob * U[deltabi]);
+		den_amplitude = abs(omega_c * U[deltaci] + omega_b * U[deltabi]) / omega_m;
 		if (den_amplitude >= amp_cutoff && amp_cutoff > 0) {
-			printf("%e %e %e\n", a, den_amplitude, amp_cutoff);
 			finish_time = a;
 			break;
 		}
 
 		loga = loga0 + dloga;
 	}
-	const float power = POW(U[deltaci], 2);
-	*value = power;
+	*value = POW(den_amplitude,2);
 	return finish_time;
 }
 
@@ -272,7 +271,7 @@ float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, floa
 	float dlogk = (LOG(kmax) - logkmin) / (float) (block_size - 1);
 	float k = EXP(logkmin + (float ) thread * dlogk);
 	float value;
-	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, 0.1 * pow(cell_size, (float) -3));
+	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, pow(cell_size, (float) -1.5));
 	__syncthreads();
 	for (int M = block_size / 2; M >= 1; M /= 2) {
 		if (thread < M) {
@@ -286,6 +285,42 @@ float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, floa
 		delete[] mintime;
 	}
 	return rtime;
+}
+
+__device__ interp_functor<float> compute_einstein_boltzmann_interpolation_function(zero_order_universe* uni,
+		float kmin, float kmax, float normalization, float time) {
+	int thread = threadIdx.x;
+	int block_size = blockDim.x;
+	__shared__ vector<float>* pptr;
+	interp_functor<float> func;
+	float olda = uni->amax;
+	uni->amax = time;
+	float dlogk = 1.0e-2;
+	float logkmin = LOG(kmin) - dlogk;
+	float logkmax = LOG(kmax) + dlogk;
+	int N = (logkmax - logkmin) / dlogk + 2;
+	dlogk = (logkmax - logkmin) / (float) (N-1);
+	if (thread == 0) {
+		pptr = new vector<float>(N);
+		printf("Computing power spectrum interpolation function with %i bins\n", N);
+	}
+	__syncthreads();
+	for( int i = thread; i < N; i+= block_size) {
+		float amp;
+		float k = EXP(logkmin + (float) i * dlogk);
+		einstein_boltzmann(&amp, uni, k, normalization);
+		(*pptr)[i] = amp;
+	}
+	__syncthreads();
+	if( thread == 0 ) {
+		build_interpolation_function(&func, *pptr, EXP(logkmin), EXP(logkmax));
+	}
+	__syncthreads();
+	if( thread == 0 ) {
+		delete [] pptr;
+	}
+	uni->amax = olda;
+	return func;
 }
 
 #endif /* GPUTIGER_BOLTZMANN_HPP_ */

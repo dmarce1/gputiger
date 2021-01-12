@@ -7,9 +7,20 @@
 #pragma once
 
 #include <gputiger/chemistry.hpp>
-#include <gputiger/boltzmann.hpp>
 #include <gputiger/util.hpp>
 #include <gputiger/params.hpp>
+#include <gputiger/interp.hpp>
+
+
+struct zero_order_universe {
+	cosmic_parameters params;
+	double amin;
+	double amax;
+	nvstd::function<float(float)> hubble;
+	interp_functor<float> sigma_T;
+	interp_functor<float> cs2;
+};
+
 
 __device__ static
 void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_parameters &opts, double amax) {

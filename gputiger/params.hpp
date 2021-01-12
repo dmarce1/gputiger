@@ -9,7 +9,6 @@
 #define GPUTIGER_PARAMS_HPP_
 
 #include <nvfunctional>
-#include <gputiger/interp.hpp>
 
 #define POW(a,b) powf(a,b)
 #define LOG(a) logf(a)
@@ -17,9 +16,10 @@
 #define SQRT(a) sqrtf(a)
 #define COS(a) cosf(a)
 #define SIN(a) sinf(a)
+#define SINCOS(a,b,c) sincosf(a,b,c)
+
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
-
 
 
 struct cosmic_parameters {
@@ -35,17 +35,6 @@ struct cosmic_parameters {
 	int Ngrid;
 	double box_size;
 };
-
-
-struct zero_order_universe {
-	cosmic_parameters params;
-	double amin;
-	double amax;
-	nvstd::function<float(float)> hubble;
-	interp_functor<float> sigma_T;
-	interp_functor<float> cs2;
-};
-
 
 
 
