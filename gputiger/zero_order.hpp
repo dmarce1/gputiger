@@ -17,7 +17,6 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 	printf("Creating zero order Universe\n");
 	printf("Parameters:\n");
 	using namespace constants;
-	double dloga = 5.0e-2;
 	double omega_b = opts.omega_b;
 	double omega_c = opts.omega_c;
 	double omega_gam = opts.omega_gam;
@@ -26,13 +25,15 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 	double omega_r = omega_gam + omega_nu;
 	double Theta = opts.Theta;
 	double littleh = opts.h;
+	double Neff = opts.Neff;
 	double Y = opts.Y;
 	double amin = Theta * Tcmb / (0.07 * 1e6 * evtoK);
 	double logamin = log(amin);
 	double logamax = log(amax);
-	int N = (logamax - logamin) / dloga + 1;
-	vector<boltz_real> thomson(N+1);
-	vector<boltz_real> sound_speed2(N+1);
+	int N = 16*1024;
+	double dloga = (logamax - logamin) / N;
+	vector<float> thomson(N+1);
+	vector<float> sound_speed2(N+1);
 
 	printf("\t h                 = %f\n", littleh);
 	printf("\t omega_m           = %f\n", omega_m);
@@ -42,6 +43,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 	printf("\t omega_c           = %f\n", omega_c);
 	printf("\t omega_gam         = %f\n", omega_gam);
 	printf("\t omega_nu          = %f\n", omega_nu);
+	printf("\t Neff              = %f\n", Neff);
 	printf("\t temperature today = %f\n\n", 2.73 * Theta);
 
 	dloga = (logamax - logamin) / N;
@@ -212,7 +214,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 			print_time(t);
 			printf(", redshift %.1f: Matter domination ends, dark energy is now the dominate force in the Universe, at a temperature of %8.2e K.\n", 1/a-1, Trad);
 		}
-		sound_speed2[i - 1] = cs2 / c;
+		sound_speed2[i - 1] = cs2 / (c*c);
 		thomson[i] = sigmaT;
 	}
 	cs2 = (P - P1) / (rho_b - rho1);
@@ -222,8 +224,8 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 			Trad);
 	uni.amin = amin;
 	uni.amax = amax;
-	build_interpolation_function(&uni.sigma_T, thomson, (boltz_real) amin,(boltz_real)  amax);
-	build_interpolation_function(&uni.cs2, sound_speed2, (boltz_real) amin, (boltz_real) amax);
+	build_interpolation_function(&uni.sigma_T, thomson, (float) amin,(float)  amax);
+	build_interpolation_function(&uni.cs2, sound_speed2, (float) amin, (float) amax);
 	uni.hubble = std::move(cosmic_hubble);
 	uni.params = opts;
 }

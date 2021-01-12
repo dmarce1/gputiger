@@ -11,7 +11,12 @@
 #include <nvfunctional>
 #include <gputiger/interp.hpp>
 
-using boltz_real = float;
+#define POW(a,b) powf(a,b)
+#define LOG(a) logf(a)
+#define EXP(a) expf(a)
+#define SQRT(a) sqrtf(a)
+#define COS(a) cosf(a)
+#define SIN(a) sinf(a)
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
 
@@ -26,6 +31,7 @@ struct cosmic_parameters {
 	double omega_gam;
 	double omega_c;
 	double Neff;
+	double sigma8;
 	int Ngrid;
 	double box_size;
 };
@@ -35,9 +41,9 @@ struct zero_order_universe {
 	cosmic_parameters params;
 	double amin;
 	double amax;
-	nvstd::function<boltz_real(boltz_real)> hubble;
-	interp_functor<boltz_real> sigma_T;
-	interp_functor<boltz_real> cs2;
+	nvstd::function<float(float)> hubble;
+	interp_functor<float> sigma_T;
+	interp_functor<float> cs2;
 };
 
 

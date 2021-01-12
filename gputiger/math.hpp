@@ -45,73 +45,63 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 	int thread = threadIdx.x;
 	const auto& f = *fptr;
 	__syncthreads();
-	__shared__
-	REAL* sums1;
-	__shared__
-	REAL* sums2;
-	__shared__
-	REAL* error_ptr;
-	if( thread == 0 ) {
+	__shared__ REAL* sums1;
+	__shared__ REAL* sums2;
+	__shared__ REAL* error_ptr;
+	if (thread == 0) {
 		sums1 = new REAL[1024];
 		sums2 = new REAL[1024];
 		error_ptr = new REAL;
 	}
 	__syncthreads();
 	REAL& err = *error_ptr;
-	int N = 33;
+	int N = 6*((block_size-1)/6)+1;
 	REAL sum1, sum2;
 	do {
 		sum1 = REAL(0);
 		sum2 = REAL(0);
-		REAL dx = (b - a) / REAL(N-1);
-		REAL fa, fb;
-		if( thread == 0 ) {
-			fa = f(a);
-			fb = f(b);
-			sum1 = (fa + fb) * dx / REAL(3.0);
-			sum2 = (fa + fb) * dx * REAL(2*7)/REAL(45);
-		} else {
-			sum1 = sum2 = 0.0;
-		}
-		__syncthreads();
-		const REAL wt1[4] = {REAL(2)/REAL(3),REAL(4)/REAL(3),REAL(2)/REAL(3),REAL(4)/REAL(3)};
-		const REAL wt2[4] = {REAL(4*7)/REAL(45),REAL(64)/REAL(45),REAL(24)/REAL(45),REAL(64)/REAL(45)};
-			for (int i = 1 + thread; i < N-1; i += block_size) {
+		REAL dx = (b - a) / REAL(N - 1);
+		sum1 = sum2 = 0.0;
+		const REAL wt1[3] = { 6.0 / 8.0, 9.0 / 8.0, 9.0 / 8.0 };
+		const REAL wt2[6] = { 82.0 / 140.0, 216.0 / 140.0, 27.0 / 140.0, 272.0
+				/ 140.0, 27.0 / 140.0, 216.0 / 140.0 };
+		for (int i = thread; i < N; i += block_size) {
 			REAL x = a + REAL(i) * dx;
 			REAL this_f = f(x);
-			sum2 += wt2[i%4] * this_f * dx;
-			sum1 += wt1[i%4] * this_f * dx;
+			sum2 += this_f * dx* wt2[i%6]
+					* (i==0||i==N-1 ? REAL(0.5) : REAL(1));
+			sum1 += this_f * dx * wt1[i%3]
+					* (i==0||i==N-1 ? REAL(0.5) : REAL(1));
 		}
 		sums1[thread] = sum1;
 		sums2[thread] = sum2;
-			__syncthreads();
-		for( int M = block_size / 2; M >= 1; M/=2) {
-			if( thread < M) {
-				sums1[thread] += sums1[thread+M];
-				sums2[thread] += sums2[thread+M];
+		__syncthreads();
+		for (int M = block_size / 2; M >= 1; M /= 2) {
+			if (thread < M) {
+				sums1[thread] += sums1[thread + M];
+				sums2[thread] += sums2[thread + M];
 			}
 			__syncthreads();
 		}
-		if( thread == 0 ) {
+		if (thread == 0) {
 			sum1 = sums1[0];
 			sum2 = sums2[0];
-			if( sum2 != REAL(0)) {
-				err = abs((sum2 - sum1)/sum2);
-			} else if( sum1 != REAL(0.0)) {
-				err = abs((sum1 - sum2)/sum1);
+			if (sum2 != REAL(0)) {
+				err = abs((sum2 - sum1) / sum2);
+			} else if (sum1 != REAL(0.0)) {
+				err = abs((sum1 - sum2) / sum1);
 			} else {
 				err = REAL(0.0);
 			}
 			*result = sum2;
-			printf( "%i %e %e\n", N, sum1, sum2);
 		}
-		N = 2 * (N-1)+1;
+		N = 2 * (N - 1) + 1;
 		__syncthreads();
-	}while( err > toler);
+	} while (err > toler);
 	__syncthreads();
-	if( thread == 0 ) {
-		delete [] sums1;
-		delete [] sums2;
+	if (thread == 0) {
+		delete[] sums1;
+		delete[] sums2;
 		delete error_ptr;
 	}
 	__syncthreads();
