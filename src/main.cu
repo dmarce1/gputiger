@@ -1,7 +1,107 @@
 
-#include <thrust/complex.h>
+class cmplx {
+	float x, y;
+public:
+	__device__
+	cmplx() = default;
+	__device__
+	cmplx(float a) {
+		x = a;
+		y = 0.f;
+	}
+	__device__
+	cmplx(float a, float b) {
+		x = a;
+		y = b;
+	}
+	__device__
+	cmplx& operator+=(cmplx other) {
+		x += other.x;
+		y += other.y;
+		return *this;
+	}
+	__device__
+	cmplx& operator-=(cmplx other) {
+		x -= other.x;
+		y -= other.y;
+		return *this;
+	}
+	__device__
+	cmplx operator*(cmplx other) const {
+		cmplx a;
+		a.x = x * other.x - y * other.y;
+		a.y = x * other.y + y * other.x;
+		return a;
+	}
+	__device__
+	cmplx operator/(cmplx other) const {
+		return *this * other.conj() / other.norm();
+	}
+	__device__
+	cmplx operator/(float other) const {
+		cmplx b;
+		b.x = x / other;
+		b.y = y / other;
+		return b;
+	}
+	__device__
+	cmplx operator*(float other) const {
+		cmplx b;
+		b.x = x * other;
+		b.y = y * other;
+		return b;
+	}
+	__device__
+	cmplx operator+(cmplx other) const {
+		cmplx a;
+		a.x = x + other.x;
+		a.y = y + other.y;
+		return a;
+	}
+	__device__
+	cmplx operator-(cmplx other) const {
+		cmplx a;
+		a.x = x - other.x;
+		a.y = y - other.y;
+		return a;
+	}
+	__device__
+	cmplx conj() const {
+		cmplx a;
+		a.x = x;
+		a.y = -y;
+		return a;
+	}
+	__device__
+	float real() const {
+		return x;
+	}
+	__device__
+	float imag() const {
+		return y;
+	}
+	__device__
+	float norm() const {
+		return ((*this)*conj()).real();
+	}
+	__device__
+	float abs() const {
+		return sqrtf(norm());
+	}
+	__device__
+	cmplx operator-() const {
+		cmplx a;
+		a.x = -x;
+		a.y = -y;
+		return a;
+	}
+};
 
-using cmplx = thrust::complex<float>;
+__device__
+cmplx operator*(float a, cmplx b)  {
+	return b * a;
+}
+
 
 struct arena_t {
 	cmplx* rands;
@@ -32,7 +132,6 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		arena = arena_;
 	}
 	__syncthreads();
-	const int block_size = blockDim.x;
 	__shared__
 	double *result_ptr;
 	__shared__
@@ -50,6 +149,7 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		func_ptr->uni = zeroverse_ptr;
 		integrate<sigma8_integrand, double> <<<1, BLOCK_SIZE>>>(func_ptr,
 				LOG(0.25 / 16.0), LOG(0.25 * 16.0), result_ptr, 1.0e-6);
+		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());
 		*result_ptr = SQRT(1.0 / *result_ptr);
 		printf("The normalization value is %e\n", *result_ptr * pow(opts.sigma8, 2));
@@ -59,17 +159,20 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		printf("Computing start time for non-linear evolution\n");
 	}
 	float normalization = *result_ptr;
-	float kmax = (float) M_PI / opts.box_size;
-	float kmin = kmax / (float) (opts.Ngrid / 2);
+	float kmin = 2.0 * (float) M_PI / opts.box_size;
+	float kmax = kmin * (float) (opts.Ngrid / 2);
 	kmax *= SQRT(3);
 	if (thread == 0) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
 	}
-
-	float time = find_nonlinear_time(zeroverse_ptr, kmin, kmax, opts.box_size / opts.Ngrid, normalization);
+	normalization *= pow(2.f * (float) M_PI / opts.box_size, 1.5);
+	float time = find_nonlinear_time(zeroverse_ptr, kmin, kmax, opts.box_size, normalization);
 	if (thread == 0) {
-		printf("Non-linear evolution starts at redshift = %e\n", (float) 1 / time - (float) 1);
+		float z = (float) 1 / time - (float) 1;
+		printf("Non-linear evolution starts at redshift = %.1f, \n", z);
+		print_time(zeroverse_ptr->redshift_to_time(z));
+		printf("\t after the Big Bang.\n");
 	}
 	__syncthreads();
 	auto tmp = compute_einstein_boltzmann_interpolation_function(zeroverse_ptr, kmin, kmax, normalization, time);
@@ -87,14 +190,11 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		printf("\n");
 	}
 	__syncthreads();
-	if( thread == 0 ) {
-		printf( "Generating density Fourier transform\n");
+	if (thread == 0) {
+		printf("Generating density Fourier transform\n");
 	}
-	density_transform( pfunc, opts.box_size, opts.Ngrid);
+	zeldovich(pfunc, opts.box_size, opts.Ngrid);
 	__syncthreads();
-	if( thread == 0 ) {
-		printf( "Transforming density to real space\n");
-	}
 	if (thread == 0) {
 		delete zeroverse_ptr;
 		delete result_ptr;
@@ -129,10 +229,12 @@ int main() {
 	params.omega_gam = omega_r - params.omega_nu;
 	arena_t arena;
 	const int N = params.Ngrid;
-	CUDA_CHECK(cudaMalloc(&arena.rands, sizeof(cmplx) * N * N * N / 2));
-	CUDA_CHECK(cudaMalloc(&arena.four, sizeof(cmplx) * N * N * N / 2));
+	CUDA_CHECK(cudaMalloc(&arena.rands, sizeof(cmplx) * N * N * N));
+	CUDA_CHECK(cudaMalloc(&arena.four, sizeof(cmplx) * N * N * N));
 
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, params);
+	CUDA_CHECK(cudaGetLastError());
+
 
 	CUDA_CHECK(cudaDeviceSynchronize());
 }

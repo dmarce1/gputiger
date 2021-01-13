@@ -116,18 +116,24 @@ __device__ cmplx expc(cmplx z) {
 
 __device__
 void generate_random_normals(cmplx* nums, int N) {
-	uint64_t a = 48271;
-	uint64_t mod = 0x7fffffff;
+	int64_t a = 48271;
+	int64_t mod = 0x7fffffff;
 	const int& thread = threadIdx.x;
 	const int& block_size = blockDim.x;
-	int int1 = (a * (thread + 123)) % mod;
-	int int2 = (a * (thread + 4646)) % mod;
+	int32_t int1 = (a * (thread + 123)) % mod;
+	int32_t int2 = (a * (thread + 4646)) % mod;
 	for (int i = thread; i < N; i += block_size) {
-		int1 = (int) (((uint64_t) a * (uint64_t) int1) % (uint64_t) mod);
-		int2 = (int) (((uint64_t) a * (uint64_t) int2) % (uint64_t) mod);
-		float x = ((float) int1 + 0.5f) / (float) 0x100000000L;
-		float y = 2.f * (float) M_PI * ((float) int2 + 0.5f) / (float) 0x100000000L;
-		nums[i] = SQRT(-LOG(x)) * expc(cmplx(0, 1) * y);
+		int1 = (int32_t) (((int64_t) a * (int64_t) int1) % (int64_t) mod);
+		int iters = int1 % 100;
+		for (int j = 0; j < iters; j++) {
+			int1 = (int32_t) (((int64_t) a * (int64_t) int1) % (int64_t) mod);
+			int2 = (int32_t) (((int64_t) a * (int64_t) int2) % (int64_t) mod);
+		}
+		float x1 = ((float) int1 + 0.5f) / (float) int64_t(0x7fffffffLL+int64_t(1));
+		float y1 = ((float) int2 + 0.5f) / (float) int64_t(0x7fffffffLL+int64_t(1));
+		float x = x1;
+		float y = 2.f * (float) M_PI * y1;
+		nums[i] = SQRT(-LOG(abs(x))) * expc(cmplx(0, 1) * y);
 	}
 	__syncthreads();
 }

@@ -57,7 +57,6 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 	float amax = uni.amax;
 	float loga = LOG(amin);
 	float logamax = LOG(amax);
-	float logamin = loga;
 	float eps = k / (amin * Hubble(amin));
 	float C = (float) 1.0 * POW(eps, (float ) -1.5) * normalization;
 	float a = EXP(loga);
@@ -239,7 +238,7 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 
 		loga = loga0 + dloga;
 	}
-	*value = POW(den_amplitude,2);
+	*value = POW(den_amplitude, 2);
 	return finish_time;
 }
 
@@ -247,7 +246,7 @@ struct sigma8_integrand {
 	const zero_order_universe* uni;
 	__device__ float operator()(float x) const {
 		constexpr float R = 8;
-		const float c0 = float(9) / (float(2) * float(M_PI) * pow(R, 6));
+		const float c0 = float(9) / (float(2) * float(M_PI)* float(M_PI) * pow(R, 6));
 		float P1;
 		float k = EXP(x);
 		einstein_boltzmann(&P1, uni, k);
@@ -256,7 +255,7 @@ struct sigma8_integrand {
 };
 
 __device__
-float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, float kmax, float cell_size,
+float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, float kmax, float box_size,
 		float normalization) {
 	int thread = threadIdx.x;
 	const int block_size = blockDim.x;
@@ -271,7 +270,7 @@ float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, floa
 	float dlogk = (LOG(kmax) - logkmin) / (float) (block_size - 1);
 	float k = EXP(logkmin + (float ) thread * dlogk);
 	float value;
-	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, pow(cell_size, (float) -1.5));
+	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, 0.1);
 	__syncthreads();
 	for (int M = block_size / 2; M >= 1; M /= 2) {
 		if (thread < M) {
@@ -287,8 +286,8 @@ float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, floa
 	return rtime;
 }
 
-__device__ interp_functor<float> compute_einstein_boltzmann_interpolation_function(zero_order_universe* uni,
-		float kmin, float kmax, float normalization, float time) {
+__device__ interp_functor<float> compute_einstein_boltzmann_interpolation_function(zero_order_universe* uni, float kmin,
+		float kmax, float normalization, float time) {
 	int thread = threadIdx.x;
 	int block_size = blockDim.x;
 	__shared__ vector<float>* pptr;
@@ -299,25 +298,25 @@ __device__ interp_functor<float> compute_einstein_boltzmann_interpolation_functi
 	float logkmin = LOG(kmin) - dlogk;
 	float logkmax = LOG(kmax) + dlogk;
 	int N = (logkmax - logkmin) / dlogk + 2;
-	dlogk = (logkmax - logkmin) / (float) (N-1);
+	dlogk = (logkmax - logkmin) / (float) (N - 1);
 	if (thread == 0) {
 		pptr = new vector<float>(N);
 		printf("Computing power spectrum interpolation function with %i bins\n", N);
 	}
 	__syncthreads();
-	for( int i = thread; i < N; i+= block_size) {
+	for (int i = thread; i < N; i += block_size) {
 		float amp;
-		float k = EXP(logkmin + (float) i * dlogk);
+		float k = EXP(logkmin + (float ) i * dlogk);
 		einstein_boltzmann(&amp, uni, k, normalization);
 		(*pptr)[i] = amp;
 	}
 	__syncthreads();
-	if( thread == 0 ) {
+	if (thread == 0) {
 		build_interpolation_function(&func, *pptr, EXP(logkmin), EXP(logkmax));
 	}
 	__syncthreads();
-	if( thread == 0 ) {
-		delete [] pptr;
+	if (thread == 0) {
+		delete[] pptr;
 	}
 	uni->amax = olda;
 	return func;

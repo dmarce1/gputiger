@@ -10,6 +10,8 @@
 
 #include <nvfunctional>
 
+#define NDIM 3
+
 #define POW(a,b) powf(a,b)
 #define LOG(a) logf(a)
 #define EXP(a) expf(a)
