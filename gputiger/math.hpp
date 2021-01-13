@@ -89,6 +89,7 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 			} else {
 				err = REAL(0.0);
 			}
+			printf("%e %e\n", sum1, sum2);
 			*result = sum2;
 		}
 		break;
@@ -116,21 +117,19 @@ __device__ cmplx expc(cmplx z) {
 
 __device__
 void generate_random_normals(cmplx* nums, int N) {
-	int64_t a = 48271;
 	int64_t mod = 0x7fffffff;
+	int64_t a = 1103515245LL;
+	int64_t c1= 12345;
+	int64_t c2= 54321;
 	const int& thread = threadIdx.x;
 	const int& block_size = blockDim.x;
-	int32_t int1 = (a * (thread + 123)) % mod;
-	int32_t int2 = (a * (thread + 4646)) % mod;
+	int int1 = (a * (uint64_t) thread + c1) % mod;
+	int int2 = (a * (uint64_t) thread + c2) % mod;
 	for (int i = thread; i < N; i += block_size) {
-		int1 = (int32_t) (((int64_t) a * (int64_t) int1) % (int64_t) mod);
-		int iters = int1 % 100;
-		for (int j = 0; j < iters; j++) {
-			int1 = (int32_t) (((int64_t) a * (int64_t) int1) % (int64_t) mod);
-			int2 = (int32_t) (((int64_t) a * (int64_t) int2) % (int64_t) mod);
-		}
-		float x1 = ((float) int1 + 0.5f) / (float) int64_t(0x7fffffffLL+int64_t(1));
-		float y1 = ((float) int2 + 0.5f) / (float) int64_t(0x7fffffffLL+int64_t(1));
+		int1 = (a * (uint64_t) int2 + c1) % mod;
+		int2 = (a * (uint64_t) int1 + c2) % mod;
+		float x1 = ((float) int1 + 0.5f) / (float) int64_t(0x7fffffffLL + int64_t(1));
+		float y1 = ((float) int2 + 0.5f) / (float) int64_t(0x7fffffffLL + int64_t(1));
 		float x = x1;
 		float y = 2.f * (float) M_PI * y1;
 		nums[i] = SQRT(-LOG(abs(x))) * expc(cmplx(0, 1) * y);

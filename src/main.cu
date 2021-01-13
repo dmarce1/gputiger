@@ -124,6 +124,10 @@ __device__ zero_order_universe *zeroverse_ptr;
 
 __device__ interp_functor<float>* power_interp_ptr;
 
+
+__device__ float test(float x) {
+	return x*x;
+}
 __global__
 void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	const int thread = threadIdx.x;
@@ -146,12 +150,13 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		result_ptr = new double;
 		func_ptr = new sigma8_integrand;
 		func_ptr->uni = zeroverse_ptr;
+		func_ptr->littleh= opts.h;
 		integrate<sigma8_integrand, double> <<<1, BLOCK_SIZE>>>(func_ptr,
-				LOG(0.25 / 16.0), LOG(0.25 * 16.0), result_ptr, 1.0e-6);
+				LOG(0.25 / 32.0 * opts.h), LOG(0.25 * 32.0 * opts.h), result_ptr, 1.0e-6);
 		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());
-		*result_ptr = SQRT(1.0 / *result_ptr);
-		printf("The normalization value is %e\n", *result_ptr * POW(opts.sigma8, 2));
+		*result_ptr = SQRT(opts.sigma8*opts.sigma8 / *result_ptr);
+		printf("The normalization value is %e\n", *result_ptr);
 	}
 	__syncthreads();
 	if (thread == 0) {
@@ -166,7 +171,7 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 				opts.box_size);
 	}
 //	normalization *= ;
-	float time = find_nonlinear_time(zeroverse_ptr, kmin, kmax, opts.box_size/opts.Ngrid, normalization);
+	float time = find_nonlinear_time(zeroverse_ptr, kmin, kmax, opts.box_size, normalization);
 	if (thread == 0) {
 		float z = (float) 1 / time - (float) 1;
 		printf("Non-linear evolution starts at redshift = %.1f, \n", z);
@@ -219,8 +224,8 @@ int main() {
 	params.omega_c = 0.25;
 	params.Theta = 1.0;
 	params.Ngrid = 256;
-	params.sigma8 = 0.761 / 0.8;
-	params.box_size = 1000.0;
+	params.sigma8 = 0.8367;
+	params.box_size = 100.0;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);
@@ -228,7 +233,7 @@ int main() {
 	params.omega_gam = omega_r - params.omega_nu;
 	arena_t arena;
 	const int N = params.Ngrid;
-	CUDA_CHECK(cudaMalloc(&arena.cmplx_space, 4*sizeof(cmplx) * N * N * N));
+	CUDA_CHECK(cudaMalloc(&arena.cmplx_space, 5*sizeof(cmplx) * N * N * N));
 
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, params);
 	CUDA_CHECK(cudaGetLastError());

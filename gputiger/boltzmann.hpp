@@ -244,9 +244,10 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 
 struct sigma8_integrand {
 	const zero_order_universe* uni;
+	float littleh;
 	__device__ float operator()(float x) const {
-		constexpr float R = 8;
-		const float c0 = float(9) / (float(2) * float(M_PI)* float(M_PI) * pow(R, 6));
+		const float R = 8 / littleh;
+		const float c0 = float(9) / (2.f* float(M_PI)* float(M_PI)) / pow(R, 6);
 		float P1;
 		float k = EXP(x);
 		einstein_boltzmann(&P1, uni, k);
@@ -270,7 +271,7 @@ float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, floa
 	float dlogk = (LOG(kmax) - logkmin) / (float) (block_size - 1);
 	float k = EXP(logkmin + (float ) thread * dlogk);
 	float value;
-	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, 0.01);
+	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, pow(cell_size,1.5));
 	__syncthreads();
 	for (int M = block_size / 2; M >= 1; M /= 2) {
 		if (thread < M) {
@@ -293,7 +294,10 @@ __device__ interp_functor<float> compute_einstein_boltzmann_interpolation_functi
 	__shared__ vector<float>* pptr;
 	interp_functor<float> func;
 	float olda = uni->amax;
-	uni->amax = time;
+	if( thread == 0 ) {
+		uni->amax = time;
+	}
+	__syncthreads();
 	float dlogk = 1.0e-2;
 	float logkmin = LOG(kmin) - dlogk;
 	float logkmax = LOG(kmax) + dlogk;
@@ -318,7 +322,10 @@ __device__ interp_functor<float> compute_einstein_boltzmann_interpolation_functi
 	if (thread == 0) {
 		delete[] pptr;
 	}
-	uni->amax = olda;
+	if( thread == 0 ) {
+		uni->amax = olda;
+	}
+	__syncthreads();
 	return func;
 }
 
