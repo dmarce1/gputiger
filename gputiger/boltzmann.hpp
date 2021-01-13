@@ -255,7 +255,7 @@ struct sigma8_integrand {
 };
 
 __device__
-float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, float kmax, float box_size,
+float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, float kmax, float cell_size,
 		float normalization) {
 	int thread = threadIdx.x;
 	const int block_size = blockDim.x;
@@ -270,7 +270,7 @@ float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, floa
 	float dlogk = (LOG(kmax) - logkmin) / (float) (block_size - 1);
 	float k = EXP(logkmin + (float ) thread * dlogk);
 	float value;
-	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, 0.1);
+	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, 0.01);
 	__syncthreads();
 	for (int M = block_size / 2; M >= 1; M /= 2) {
 		if (thread < M) {
