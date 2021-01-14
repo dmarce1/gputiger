@@ -33,7 +33,7 @@ static double find_root(nvstd::function<double(double)> f) {
 			printf("Finished early with error = %e\n", err);
 			break;
 		}
-	} while (err > 1.0e-14);
+	} while (err > 1.0e-12);
 	return x;
 }
 

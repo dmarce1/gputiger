@@ -35,6 +35,7 @@ struct cosmic_parameters {
 	float omega_c;
 	float Neff;
 	float sigma8;
+	int nout;
 	int Ngrid;
 	float box_size;
 };

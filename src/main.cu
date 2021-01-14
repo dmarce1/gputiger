@@ -124,6 +124,11 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		create_zero_order_universe(zeroverse_ptr, opts, 1.0);
 	}
 	__syncthreads();
+	const float taumax = zeroverse_ptr->scale_factor_to_conformal_time(zeroverse_ptr->amax);
+	if (thread == 0) {
+		printf("Universe is %e billion years old in conformal time\n", taumax * constants::seconds_to_years * 1e-9);
+	}
+	__syncthreads();
 
 	float kmin = 2.0 * (float) M_PI / opts.box_size;
 	float kmax = kmin * (float) (opts.Ngrid / 2);
@@ -165,18 +170,21 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 	float logamax = LOG(zeroverse_ptr->amax);
 	float loga = logamin;
 	float drho;
-	float a;
-	for (; loga < LOG(zeroverse_ptr->amax) - dloga; loga += dloga) {
-		if (iter > 1) {
-			dloga = 2*(opts.max_overden - drho) / opts.max_overden;
-		}
-		float amin = EXP(loga);
-		float amax = EXP(loga + dloga);
+	float last_drho;
+	float last_a;
+	float dtau = taumax / opts.nout;
+	float taumin = 1.0 / (zeroverse_ptr->amin * zeroverse_ptr->hubble(zeroverse_ptr->amin));
+	float a = zeroverse_ptr->amin;
+	float tau;
+	for (tau = taumin; tau < taumax - dtau; tau += dtau) {
+		last_a = a;
+		a = zeroverse_ptr->conformal_time_to_scale_factor(tau + dtau);
 		if (thread == 0) {
-			printf("Advancing Einstein Boltzmann solutions from redshift %.1f to %.1f\n", 1 / amin - 1, 1 / amax - 1);
+			printf("Advancing Einstein Boltzmann solutions from redshift %.1f to %.1f\n", 1 / last_a - 1, 1 / a - 1);
 		}
-		einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, amin, amax);
+		einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, last_a, a);
 		__syncthreads();
+		last_drho = drho;
 		drho = zeldovich_overdensity(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid);
 		__syncthreads();
 		if (thread == 0) {
@@ -185,20 +193,29 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		__syncthreads();
 		if (iter > 0) {
 			if (drho > opts.max_overden) {
-				a = amax;
+				tau -= dtau;
+				drho = last_drho;
 				break;
 			}
 		}
 		__syncthreads();
 		iter++;
 	}
+	a = zeroverse_ptr->conformal_time_to_scale_factor(tau);
+	if (thread == 0) {
+		printf(
+				"Computing initial conditions for non-linear evolution to begin at redshift %e with a maximum over/under density of %e\n",
+				1 / a - 1, drho);
+	}
+	einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
 	__syncthreads();
-	generate_random_normals(rands, N * N * N);
+	einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin,
+			a);
 	__syncthreads();
 	for (int dim = 0; dim < NDIM; dim++) {
 		float vmax = zeldovich_velocities(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, 0);
 		__syncthreads();
-		for (int ij = thread; ij < N*N; ij += block_size) {
+		for (int ij = thread; ij < N * N; ij += block_size) {
 			int i = ij / N;
 			int j = ij % N;
 			for (int k = 0; k < N; k++) {
@@ -210,7 +227,7 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		__syncthreads();
 		float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
 		__syncthreads();
-		for (int ij = thread; ij < N*N; ij += block_size) {
+		for (int ij = thread; ij < N * N; ij += block_size) {
 			int i = ij / N;
 			int j = ij % N;
 			for (int k = 0; k < N; k++) {
@@ -219,14 +236,13 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 				float x = ((float) I[dim] + 0.5f) / (float) N - 0.5f;
 				x += phi[l].real();
 				float test1 = host_parts[l].v[0] / phi[l].real();
-				printf("%e\n", test1);
 				host_parts[l].x[dim] = float_to_pos(x);
 			}
 		}
 		__syncthreads();
 	}
 	__syncthreads();
-	for (int ij = thread; ij < N*N; ij += block_size) {
+	for (int ij = thread; ij < N * N; ij += block_size) {
 		int i = ij / N;
 		int j = ij % N;
 		for (int k = 0; k < N; k++) {
@@ -257,16 +273,18 @@ int main() {
 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
 	particle* parts_ptr;
 	printf("Stack Size = %li\n", stack_size);
-	params.h = 0.7;
-	params.Neff = 3.086;
+
+	params.h = 0.697;
+	params.Neff = 3.84;
 	params.Y = 0.24;
-	params.omega_b = 0.05;
-	params.omega_c = 0.25;
+	params.omega_b = 0.0240 / (params.h * params.h);
+	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
 	params.Ngrid = 256;
 	params.sigma8 = 0.8367;
 	params.max_overden = 0.9;
 	params.box_size = 100.0;
+	params.nout = 64;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);

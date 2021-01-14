@@ -35,6 +35,53 @@ struct zero_order_universe {
 		Onu = params.omega_nu * Or / omega_r;
 	}
 	__device__
+	float conformal_time_to_scale_factor(float taumax) {
+		taumax *= constants::H0 / cosmic_constants::H0;
+		float dlogtau = 1.0e-3;
+		float a = amin;
+		float logtaumax = LOG(taumax);
+		float logtaumin = LOG(1.f / (a * hubble(a)));
+		int N = (logtaumax - logtaumin) / dlogtau + 1;
+		dlogtau = (logtaumax - logtaumin) / N;
+		for (int i = 0; i < N; i++) {
+			float logtau = logtaumin + (float) i * dlogtau;
+			float tau = EXP(logtau);
+			float a0 = a;
+			a += tau * a * a * hubble(a) * dlogtau;
+			logtau = logtaumin + (float) (i + 1) * dlogtau;
+			tau = EXP(logtau);
+			a = 0.75f * a0 + 0.25f * (a + tau * a * a * hubble(a)* dlogtau);
+			logtau = logtaumin + ((float) i + 0.5f) * dlogtau;
+			tau = EXP(logtau);
+			a = 1.f / 3.f * a0 + 2.f / 3.f * (a + tau * a * a * hubble(a)* dlogtau);
+		}
+		return a;
+	}
+	__device__
+	float scale_factor_to_conformal_time(float a) {
+		float amax = a;
+		float dloga = 1e-2;
+		float logamin = LOG(amin);
+		float logamax = LOG(amax);
+		int N = (logamax - logamin) / dloga + 1;
+		dloga = (logamax - logamin) / (float) N;
+		float tau = 1.f / (amin * hubble(amin));
+		for (int i = 0; i < N; i++) {
+			float loga = logamin + (float) i * dloga;
+			float a = EXP(loga);
+			float tau0 = tau;
+			tau += dloga / (a * hubble(a));
+			loga = logamin + (float) (i + 1) * dloga;
+			a = EXP(loga);
+			tau = 0.75f * tau0 + 0.25f * (tau + dloga / (a * hubble(a)));
+			loga = logamin + ((float) i + 0.5f) * dloga;
+			a = EXP(loga);
+			tau = (1.f / 3.f) * tau0 + (2.f / 3.f) * (tau + dloga / (a * hubble(a)));
+		}
+		tau *= cosmic_constants::H0 / constants::H0;
+		return tau;
+	}
+	__device__
 	float redshift_to_time(float z) const {
 		float amax = 1.f / (1.f + z);
 		float dloga = 1e-3;
@@ -43,7 +90,7 @@ struct zero_order_universe {
 		int N = (logamax - logamin) / dloga + 1;
 		dloga = (logamax - logamin) / (float) N;
 		float t = 0.0;
-		for (int i = 0; i <= N; i++) {
+		for (int i = 0; i < N; i++) {
 			float loga = logamin + (float) i * dloga;
 			float a = EXP(loga);
 			float t0 = t;
@@ -80,7 +127,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 	double amin = Theta * Tcmb / (0.07 * 1e6 * evtoK);
 	double logamin = log(amin);
 	double logamax = log(amax);
-	int N = 2*1024;
+	int N = 2 * 1024;
 	double dloga = (logamax - logamin) / N;
 	vector<float> thomson(N + 1);
 	vector<float> sound_speed2(N + 1);
