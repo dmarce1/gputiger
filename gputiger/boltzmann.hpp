@@ -16,12 +16,14 @@
 #define LMAX 32
 
 #define hdoti 0
-#define deltaci 1
-#define deltabi 2
-#define thetabi 3
-#define FLi 4
-#define GLi (4+LMAX)
-#define NLi (4+2*LMAX)
+#define etai 1
+#define taui 2
+#define deltaci 3
+#define deltabi 4
+#define thetabi 5
+#define FLi 6
+#define GLi (6+LMAX)
+#define NLi (6+2*LMAX)
 
 #define deltagami (FLi+0)
 #define thetagami (FLi+1)
@@ -33,44 +35,26 @@
 #define G1i (GLi+1)
 #define G2i (GLi+2)
 
-#define NFIELD (4+(3*LMAX))
+#define NFIELD (6+(3*LMAX))
 
 using cos_state = array<float,NFIELD>;
 
 #include <gputiger/zero_order.hpp>
 
-__device__
-static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr, float k, float normalization = 1,
-		float amp_cutoff = -1) {
-	const auto &uni = *uni_ptr;
-	cos_state U;
-	cos_state U0;
+__device__ void einstein_boltzmann_init(cos_state* uptr, const zero_order_universe* uni_ptr, float k,
+		float normalization, float a) {
+	cos_state& U = *uptr;
+	const zero_order_universe& uni = *uni_ptr;
 	const nvstd::function<float(float)>& Hubble = uni.hubble;
-	float den_amplitude;
-	float omega_gam = uni.params.omega_gam;
-	float omega_nu = uni.params.omega_nu;
-	float omega_b = uni.params.omega_b;
-	float omega_c = uni.params.omega_c;
-	float omega_m = omega_b + omega_c;
-	float omega_r = omega_gam + omega_nu;
-	float amin = uni.amin;
-	float amax = uni.amax;
-	float loga = LOG(amin);
-	float logamax = LOG(amax);
-	float eps = k / (amin * Hubble(amin));
-	float C = (float) 1.0 * POW(eps, (float ) -1.5) * normalization;
-	float a = EXP(loga);
+	float Oc, Ob, Ogam, Onu, Or;
+	uni.compute_radiation_fractions(Ogam, Onu, a);
+	uni.compute_matter_fractions(Oc, Ob, a);
+	Or = Ogam + Onu;
 	float hubble = Hubble(a);
-	float Or = omega_r / (omega_r + a * omega_m + (a * a * a * a) * ((float) 1.0 - omega_m - omega_r));
-	float Om = omega_m / (omega_r / a + omega_m + (a * a * a) * ((float) 1.0 - omega_m - omega_r));
-	float Ogam = omega_gam * Or / omega_r;
-	float Onu = omega_nu * Or / omega_r;
-	float Ob = omega_b * Om / omega_m;
-	float Oc = omega_c * Om / omega_m;
-	float tau = (float) 1.0 / (amin * hubble);
+	float eps = k / (a * hubble);
+	float C = (float) 1.0 * POW(eps, (float ) -1.5) * normalization;
 	float Rnu = Onu / Or;
-	float eta = (float) 2.0 * C
-			- C * ((float) 5 + (float) 4 * Rnu) / ((float) 6 * ((float) 15 + (float) 4 * Rnu)) * eps * eps;
+	U[taui] = (float) 1.0 / (a * hubble);
 	U[deltanui] = U[deltagami] = -(float) 2.0 / (float) 3.0 * C * eps * eps;
 	U[deltabi] = U[deltaci] = (float) 3.0 / (float) 4.0 * U[deltagami];
 	U[thetabi] = U[thetagami] = -C / (float) 18.0 * eps * eps * eps;
@@ -83,20 +67,32 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 		U[NLi + l] = (float) 0.0;
 		U[GLi + l] = (float) 0.0;
 	}
-	eta = ((float) 0.5 * U[hdoti]
+	U[etai] = ((float) 0.5 * U[hdoti]
 			- ((float) 1.5 * (Oc * U[deltaci] + Ob * U[deltabi])
 					+ (float) 1.5 * (Ogam * U[deltagami] + Onu * U[deltanui]))) / (eps * eps);
-	float finish_time = amax;
+}
+
+__device__
+void einstein_boltzmann(cos_state* uptr, const zero_order_universe *uni_ptr, float k, float amin, float amax) {
+	const auto &uni = *uni_ptr;
+	if (amin < uni.amin && amax > uni.amax) {
+		printf("out of range error in einstein_boltzmann\n");
+	}
+	cos_state& U = *uptr;
+	cos_state U0;
+	const nvstd::function<float(float)>& Hubble = uni.hubble;
+	float loga = LOG(amin);
+	float logamax = LOG(amax);
+	float omega_m = uni.params.omega_b + uni.params.omega_c;
+	float omega_r = uni.params.omega_gam + uni.params.omega_nu;
 	while (loga < logamax) {
-		a = EXP(loga);
+		float Oc, Ob, Ogam, Onu, Or;
+		float a = EXP(loga);
 		float hubble = Hubble(a);
 		float eps = k / (a * hubble);
-		Or = omega_r / (omega_r + a * omega_m + (a * a * a * a) * ((float) 1.0 - omega_m - omega_r));
-		Om = omega_m / (omega_r / a + omega_m + (a * a * a) * ((float) 1.0 - omega_m - omega_r));
-		Ogam = omega_gam * Or / omega_r;
-		Onu = omega_nu * Or / omega_r;
-		Ob = omega_b * Om / omega_m;
-		Oc = omega_c * Om / omega_m;
+		uni.compute_radiation_fractions(Ogam, Onu, a);
+		uni.compute_matter_fractions(Oc, Ob, a);
+		Or = Ogam + Onu;
 		float cs2 = uni.cs2(a);
 		float lambda_i = 0.0;
 		lambda_i = max(lambda_i,
@@ -117,22 +113,17 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 					cos_state dudt;
 					constexpr float beta[3] = {1, 0.25, (2.0 / 3.0)};
 					constexpr float tm[3] = {0, 1, 0.5};
-					float tau0 = tau;
-					float eta0 = eta;
 					for (int i = 0; i < 3; i++) {
 						loga = loga0 + (float) 0.5 * (tm[i] + step) * dloga;
 						a = EXP(loga);
 						hubble = Hubble(a);
 						eps = k / (a * hubble);
-						Or = omega_r / (omega_r + a * omega_m + (a * a * a * a) * ((float) 1.0 - omega_m - omega_r));
-						Om = omega_m / (omega_r / a + omega_m + (a * a * a) * ((float) 1.0 - omega_m - omega_r));
-						Ogam = omega_gam * Or / omega_r;
-						Onu = omega_nu * Or / omega_r;
-						Ob = omega_b * Om / omega_m;
-						Oc = omega_c * Om / omega_m;
+						uni.compute_radiation_fractions(Ogam,Onu,a);
+						uni.compute_matter_fractions(Oc,Ob,a);
+						Or = Ogam + Onu;
 						cs2 = uni.cs2(a);
-						float dtau = (float) 1.0 / (a * hubble);
-						float etadot = ((float) 1.5 * ((Ob * U[thetabi]) + ((float) 4.0 / (float) 3.0) * (Ogam * U[thetagami] + Onu * U[thetanui])) / eps);
+						dudt[taui] = (float) 1.0 / (a * hubble);
+						dudt[etai] = ((float) 1.5 * ((Ob * U[thetabi]) + ((float) 4.0 / (float) 3.0) * (Ogam * U[thetagami] + Onu * U[thetanui])) / eps);
 						float factor = ((a * omega_m) + (float) 4 * a * a * a * a * ((float) 1 - omega_m - omega_r))
 						/ ((float) 2 * a * omega_m + (float) 2 * omega_r + (float) 2 * a * a * a * a * ((float) 1 - omega_m - omega_r));
 						dudt[hdoti] =
@@ -144,9 +135,9 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 						dudt[thetabi] = -U[thetabi] + cs2 * eps * U[deltabi];
 						dudt[thetagami] = eps * ((float) 0.25 * U[deltagami] - (float) 0.5 * U[F2i]);
 						dudt[thetanui] = eps * ((float) 0.25 * U[deltanui] - (float) 0.5 * U[N2i]);
-						dudt[F2i] = ((float) 8.0 / (float) 15.0) * eps * U[thetagami] + ((float) 4.0 / (float) 15.0) * U[hdoti] + ((float) 8.0 / (float) 5.0) * etadot
+						dudt[F2i] = ((float) 8.0 / (float) 15.0) * eps * U[thetagami] + ((float) 4.0 / (float) 15.0) * U[hdoti] + ((float) 8.0 / (float) 5.0) * dudt[etai]
 						- ((float) 3.0 / (float) 5.0) * eps * U[FLi + 3];
-						dudt[N2i] = ((float) 8.0 / (float) 15.0) * eps * U[thetanui] + ((float) 4.0 / (float) 15.0) * U[hdoti] + ((float) 8.0 / (float) 5.0) * etadot
+						dudt[N2i] = ((float) 8.0 / (float) 15.0) * eps * U[thetanui] + ((float) 4.0 / (float) 15.0) * U[hdoti] + ((float) 8.0 / (float) 5.0) * dudt[etai]
 						- ((float) 3.0 / (float) 5.0) * eps * U[NLi + 3];
 						dudt[GLi + 0] = -eps * U[GLi + 1];
 						dudt[GLi + 1] = eps / (float) (3) * (U[GLi + 0] - (float) 2 * U[GLi + 2]);
@@ -162,8 +153,6 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 						for (int f = 0; f < NFIELD; f++) {
 							U[f] = ((float) 1 - beta[i]) * U0[f] + beta[i] * (U[f] + dudt[f] * dloga * (float) 0.5);
 						}
-						tau = ((float) 1 - beta[i]) * tau0 + beta[i] * (tau + dtau * dloga * (float) 0.5);
-						eta = ((float) 1 - beta[i]) * eta0 + beta[i] * (eta + etadot * dloga * (float) 0.5);
 					}
 				};
 
@@ -210,9 +199,9 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 						dudt[FLi + l] = U[FLi + l] * ((float) 1 / ((float) 1 + dloga * sigma) - (float) 1) / dloga;
 					}
 					dudt[GLi + LMAX - 1] = U[GLi + LMAX - 1]
-					* ((float) 1 / ((float) 1 + (sigma + (float) LMAX / (tau * a * hubble) / ((float) 2 * (float) LMAX - (float) 1))) - (float) 1) / dloga;
+					* ((float) 1 / ((float) 1 + (sigma + (float) LMAX / (U[taui] * a * hubble) / ((float) 2 * (float) LMAX - (float) 1))) - (float) 1) / dloga;
 					dudt[FLi + LMAX - 1] = U[FLi + LMAX - 1]
-					* ((float) 1 / ((float) 1 + (sigma + (float) LMAX / (tau * a * hubble) / ((float) 2 * (float) LMAX - (float) 1))) - (float) 1) / dloga;
+					* ((float) 1 / ((float) 1 + (sigma + (float) LMAX / (U[taui] * a * hubble) / ((float) 2 * (float) LMAX - (float) 1))) - (float) 1) / dloga;
 					return dudt;
 				};
 
@@ -230,16 +219,8 @@ static float einstein_boltzmann(float* value, const zero_order_universe *uni_ptr
 
 		compute_explicit(1);
 
-		den_amplitude = abs(omega_c * U[deltaci] + omega_b * U[deltabi]) / omega_m;
-		if (den_amplitude >= amp_cutoff && amp_cutoff > 0) {
-			finish_time = a;
-			break;
-		}
-
 		loga = loga0 + dloga;
 	}
-	*value = POW(den_amplitude, 2);
-	return finish_time;
 }
 
 struct sigma8_integrand {
@@ -247,72 +228,50 @@ struct sigma8_integrand {
 	float littleh;
 	__device__ float operator()(float x) const {
 		const float R = 8 / littleh;
-		const float c0 = float(9) / (2.f* float(M_PI)* float(M_PI)) / pow(R, 6);
-		float P1;
+		const float c0 = float(9) / (2.f * float(M_PI) * float(M_PI)) / pow(R, 6);
 		float k = EXP(x);
-		einstein_boltzmann(&P1, uni, k);
-		return c0 * P1 * POW((SIN(k*R) - k * R *COS(k*R)), 2) * pow(k, -3);
+		cos_state U;
+		einstein_boltzmann_init(&U, uni, k, 1.f, uni->amin);
+		einstein_boltzmann(&U, uni, k, uni->amin, 1.f);
+		float oc = uni->params.omega_c;
+		float ob = uni->params.omega_b;
+		float P = POW((oc*U[deltaci] + ob*U[deltabi])/(oc+ob), 2);
+		return c0 * P * POW((SIN(k*R) - k * R *COS(k*R)), 2) * pow(k, -3);
 	}
 };
 
-__device__
-float find_nonlinear_time(const zero_order_universe* zeroverse, float kmin, float kmax, float cell_size,
-		float normalization) {
-	int thread = threadIdx.x;
-	const int block_size = blockDim.x;
-	__shared__
-	float* mintime;
-	float rtime;
-	if (thread == 0) {
-		mintime = new float[block_size];
-	}
-	__syncthreads();
+__device__ void einstein_boltzmann_init_set(cos_state* U, zero_order_universe* uni, float kmin, float kmax, int N,
+		float amin, float normalization) {
 	float logkmin = LOG(kmin);
-	float dlogk = (LOG(kmax) - logkmin) / (float) (block_size - 1);
-	float k = EXP(logkmin + (float ) thread * dlogk);
-	float value;
-	mintime[thread] = einstein_boltzmann(&value, zeroverse, k, normalization, pow(cell_size,1.5));
-	__syncthreads();
-	for (int M = block_size / 2; M >= 1; M /= 2) {
-		if (thread < M) {
-			mintime[thread] = min(mintime[thread], mintime[thread + M]);
-		}
-		__syncthreads();
+	float logkmax = LOG(kmax);
+	float dlogk = (logkmax - logkmin) / (N - 1);
+	for (int i = threadIdx.x; i < N; i += blockDim.x) {
+		float k = EXP(logkmin + (float ) i * dlogk);
+		einstein_boltzmann_init(U + i, uni, k, normalization, uni->amin);
 	}
-	rtime = mintime[0];
 	__syncthreads();
-	if (thread == 0) {
-		delete[] mintime;
-	}
-	return rtime;
 }
 
-__device__ interp_functor<float> compute_einstein_boltzmann_interpolation_function(zero_order_universe* uni, float kmin,
-		float kmax, float normalization, float time) {
+__device__ interp_functor<float> einstein_boltzmann_interpolation_function(cos_state* U, zero_order_universe* uni,
+		float kmin, float kmax, int N, float astart, float astop) {
 	int thread = threadIdx.x;
 	int block_size = blockDim.x;
 	__shared__ vector<float>* pptr;
 	interp_functor<float> func;
-	float olda = uni->amax;
-	if( thread == 0 ) {
-		uni->amax = time;
-	}
-	__syncthreads();
 	float dlogk = 1.0e-2;
 	float logkmin = LOG(kmin) - dlogk;
 	float logkmax = LOG(kmax) + dlogk;
-	int N = (logkmax - logkmin) / dlogk + 2;
 	dlogk = (logkmax - logkmin) / (float) (N - 1);
 	if (thread == 0) {
 		pptr = new vector<float>(N);
-		printf("Computing power spectrum interpolation function with %i bins\n", N);
 	}
 	__syncthreads();
+	float oc = uni->params.omega_c;
+	float ob = uni->params.omega_b;
 	for (int i = thread; i < N; i += block_size) {
-		float amp;
 		float k = EXP(logkmin + (float ) i * dlogk);
-		einstein_boltzmann(&amp, uni, k, normalization);
-		(*pptr)[i] = amp;
+		einstein_boltzmann(U + i, uni, k, astart, astop);
+		(*pptr)[i] = POW(ob*U[i][deltabi]+oc*U[i][deltaci], 2);
 	}
 	__syncthreads();
 	if (thread == 0) {
@@ -322,10 +281,6 @@ __device__ interp_functor<float> compute_einstein_boltzmann_interpolation_functi
 	if (thread == 0) {
 		delete[] pptr;
 	}
-	if( thread == 0 ) {
-		uni->amax = olda;
-	}
-	__syncthreads();
 	return func;
 }
 

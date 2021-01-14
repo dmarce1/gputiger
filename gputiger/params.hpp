@@ -25,17 +25,18 @@
 
 
 struct cosmic_parameters {
-	double h;
-	double Y;
-	double Theta;
-	double omega_b;
-	double omega_nu;
-	double omega_gam;
-	double omega_c;
-	double Neff;
-	double sigma8;
+	float max_overden;
+	float h;
+	float Y;
+	float Theta;
+	float omega_b;
+	float omega_nu;
+	float omega_gam;
+	float omega_c;
+	float Neff;
+	float sigma8;
 	int Ngrid;
-	double box_size;
+	float box_size;
 };
 
 

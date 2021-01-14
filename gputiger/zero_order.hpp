@@ -19,6 +19,22 @@ struct zero_order_universe {
 	interp_functor<float> sigma_T;
 	interp_functor<float> cs2;
 	__device__
+	void compute_matter_fractions(float& Oc, float& Ob, float a) const {
+		float omega_m = params.omega_b + params.omega_c;
+		float omega_r = params.omega_gam + params.omega_nu;
+		float Om = omega_m / (omega_r / a + omega_m + (a * a * a) * ((float) 1.0 - omega_m - omega_r));
+		Ob = params.omega_b * Om / omega_m;
+		Oc = params.omega_c * Om / omega_m;
+	}
+	__device__
+	void compute_radiation_fractions(float& Ogam, float& Onu, float a) const {
+		float omega_m = params.omega_b + params.omega_c;
+		float omega_r = params.omega_gam + params.omega_nu;
+		float Or = omega_r / (omega_r + a * omega_m + (a * a * a * a) * ((float) 1.0 - omega_m - omega_r));
+		Ogam = params.omega_gam * Or / omega_r;
+		Onu = params.omega_nu * Or / omega_r;
+	}
+	__device__
 	float redshift_to_time(float z) const {
 		float amax = 1.f / (1.f + z);
 		float dloga = 1e-3;

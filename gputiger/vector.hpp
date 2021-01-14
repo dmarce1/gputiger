@@ -100,7 +100,7 @@ public:
 	}
 	__device__ vector<T>& operator=(vector<T> &&other) {
 		if (A) {
-			delete[] A;
+			cudaFree(A);
 		}
 		A = other.A;
 		sz = other.sz;
