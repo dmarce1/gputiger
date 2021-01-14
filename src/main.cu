@@ -87,12 +87,6 @@ __device__ cmplx operator*(float a, cmplx b) {
 	return b * a;
 }
 
-struct arena_t {
-	cmplx* cmplx_space;
-};
-
-__device__ arena_t arena;
-
 #include <nvfunctional>
 #include <gputiger/chemistry.hpp>
 #include <gputiger/options.hpp>
@@ -101,6 +95,7 @@ __device__ arena_t arena;
 #include <gputiger/zero_order.hpp>
 #include <gputiger/boltzmann.hpp>
 #include <gputiger/zeldovich.hpp>
+#include <gputiger/particle.hpp>
 
 #define BLOCK_SIZE 256
 
@@ -110,12 +105,9 @@ __device__ float test(float x) {
 	return x * x;
 }
 __global__
-void main_kernel(arena_t arena_, cosmic_parameters opts) {
+void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 	const int thread = threadIdx.x;
-	if (thread == 0) {
-		arena = arena_;
-	}
-	__syncthreads();
+	const int block_size = blockDim.x;
 	__shared__
 	float *result_ptr;
 	__shared__ sigma8_integrand *func_ptr;
@@ -123,6 +115,10 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	__shared__ interp_functor<float>* vel_k;
 	__shared__ cos_state* states;
 	__shared__ cmplx* basis;
+	const int N = opts.Ngrid;
+	const int N3 = N * N * N;
+	cmplx* phi = (cmplx*) arena;
+	cmplx* rands = ((cmplx*) arena) + N3;
 	if (thread == 0) {
 		zeroverse_ptr = new zero_order_universe;
 		create_zero_order_universe(zeroverse_ptr, opts, 1.0);
@@ -159,12 +155,12 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
 	}
-	cmplx* rands = arena.cmplx_space + opts.Ngrid * opts.Ngrid * opts.Ngrid;
 	fft_basis(basis, opts.Ngrid);
-	generate_random_normals(rands, opts.Ngrid * opts.Ngrid * opts.Ngrid);
+	generate_random_normals(rands, N * N * N);
+	__syncthreads();
 	einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
 	int iter = 0;
-	float dloga = 1.f;
+	float dloga = 2.f;
 	float logamin = LOG(zeroverse_ptr->amin);
 	float logamax = LOG(zeroverse_ptr->amax);
 	float loga = logamin;
@@ -172,7 +168,7 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	float a;
 	for (; loga < LOG(zeroverse_ptr->amax) - dloga; loga += dloga) {
 		if (iter > 1) {
-			dloga = 1.5f * (opts.max_overden-drho) / opts.max_overden;
+			dloga = 2*(opts.max_overden - drho) / opts.max_overden;
 		}
 		float amin = EXP(loga);
 		float amax = EXP(loga + dloga);
@@ -181,7 +177,7 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		}
 		einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, amin, amax);
 		__syncthreads();
-		drho = zeldovich_overdensity(basis, rands, *den_k, opts.box_size, opts.Ngrid);
+		drho = zeldovich_overdensity(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid);
 		__syncthreads();
 		if (thread == 0) {
 			printf("Maximum over/under density is %e\n", drho);
@@ -197,17 +193,48 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		iter++;
 	}
 	__syncthreads();
+	generate_random_normals(rands, N * N * N);
+	__syncthreads();
 	for (int dim = 0; dim < NDIM; dim++) {
-		cmplx* phi = arena.cmplx_space;
-		float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, dim);
-		float vmax = zeldovich_displacements(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, dim);
+		float vmax = zeldovich_velocities(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, 0);
 		__syncthreads();
-		if (thread == 0) {
-			printf("Maximum %c displacement = %e\n", 'x' + dim, xdisp);
-			printf("Maximum %c velocity     = %e\n", 'x' + dim, a*vmax);
+		for (int ij = thread; ij < N*N; ij += block_size) {
+			int i = ij / N;
+			int j = ij % N;
+			for (int k = 0; k < N; k++) {
+				const int l = N * (N * i + j) + k;
+				float v = phi[l].real();
+				host_parts[l].v[0] = v;
+			}
+		}
+		__syncthreads();
+		float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
+		__syncthreads();
+		for (int ij = thread; ij < N*N; ij += block_size) {
+			int i = ij / N;
+			int j = ij % N;
+			for (int k = 0; k < N; k++) {
+				const int l = N * (N * i + j) + k;
+				const int I[NDIM] = { i, j, k };
+				float x = ((float) I[dim] + 0.5f) / (float) N - 0.5f;
+				x += phi[l].real();
+				float test1 = host_parts[l].v[0] / phi[l].real();
+				printf("%e\n", test1);
+				host_parts[l].x[dim] = float_to_pos(x);
+			}
+		}
+		__syncthreads();
+	}
+	__syncthreads();
+	for (int ij = thread; ij < N*N; ij += block_size) {
+		int i = ij / N;
+		int j = ij % N;
+		for (int k = 0; k < N; k++) {
+			const int l = N * (N * i + j) + k;
+			host_parts[l].rung = 0;
 		}
 	}
-
+	__syncthreads();
 	if (thread == 0) {
 		delete zeroverse_ptr;
 		delete result_ptr;
@@ -228,6 +255,7 @@ int main() {
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitStackSize, desired_stack_size));
 	CUDA_CHECK(cudaDeviceGetLimit(&stack_size, cudaLimitStackSize));
 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
+	particle* parts_ptr;
 	printf("Stack Size = %li\n", stack_size);
 	params.h = 0.7;
 	params.Neff = 3.086;
@@ -244,12 +272,18 @@ int main() {
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);
 	params.omega_nu = omega_r * params.Neff / (8.0 / 7.0 * std::pow(11.0 / 4.0, 4.0 / 3.0) + params.Neff);
 	params.omega_gam = omega_r - params.omega_nu;
-	arena_t arena;
+	void* arena;
 	const int N = params.Ngrid;
-	CUDA_CHECK(cudaMalloc(&arena.cmplx_space, 2 * sizeof(cmplx) * N * N * N));
+	const int N3 = N * N * N;
+	particle* parts_device;
+	CUDA_CHECK(cudaHostAlloc(&parts_ptr, sizeof(particle) * N3, cudaHostAllocMapped));
+	CUDA_CHECK(cudaHostGetDevicePointer(&parts_device, parts_ptr, 0));
+	CUDA_CHECK(cudaMalloc(&arena, 2 * sizeof(cmplx) * N3));
 
-	main_kernel<<<1, BLOCK_SIZE>>>(arena, params);
+	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_device, params);
 	CUDA_CHECK(cudaGetLastError());
 
 	CUDA_CHECK(cudaDeviceSynchronize());
+	CUDA_CHECK(cudaFree(arena));
+	CUDA_CHECK(cudaFreeHost(parts_ptr));
 }

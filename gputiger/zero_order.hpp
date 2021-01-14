@@ -80,7 +80,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 	double amin = Theta * Tcmb / (0.07 * 1e6 * evtoK);
 	double logamin = log(amin);
 	double logamax = log(amax);
-	int N = 16 * 1024;
+	int N = 2*1024;
 	double dloga = (logamax - logamin) / N;
 	vector<float> thomson(N + 1);
 	vector<float> sound_speed2(N + 1);
