@@ -252,36 +252,47 @@ __device__ void einstein_boltzmann_init_set(cos_state* U, zero_order_universe* u
 	__syncthreads();
 }
 
-__device__ interp_functor<float> einstein_boltzmann_interpolation_function(cos_state* U, zero_order_universe* uni,
-		float kmin, float kmax, int N, float astart, float astop) {
+__device__ void einstein_boltzmann_interpolation_function(interp_functor<float>* den_k_func,
+		interp_functor<float>* vel_k_func, cos_state* U, zero_order_universe* uni, float kmin, float kmax, int N,
+		float astart, float astop) {
 	int thread = threadIdx.x;
 	int block_size = blockDim.x;
-	__shared__ vector<float>* pptr;
-	interp_functor<float> func;
+	__shared__ vector<float>* dptr;
+	__shared__ vector<float>* vptr;
 	float dlogk = 1.0e-2;
 	float logkmin = LOG(kmin) - dlogk;
 	float logkmax = LOG(kmax) + dlogk;
 	dlogk = (logkmax - logkmin) / (float) (N - 1);
 	if (thread == 0) {
-		pptr = new vector<float>(N);
+		dptr = new vector<float>(N);
+		vptr = new vector<float>(N);
 	}
 	__syncthreads();
+	auto& den_k = *dptr;
+	auto& vel_k = *vptr;
 	float oc = uni->params.omega_c;
 	float ob = uni->params.omega_b;
+	float om = oc + ob;
+	oc /= om;
+	ob /= om;
+	float H = uni->hubble(astop);
 	for (int i = thread; i < N; i += block_size) {
 		float k = EXP(logkmin + (float ) i * dlogk);
+		float eps = k / (astop * H);
 		einstein_boltzmann(U + i, uni, k, astart, astop);
-		(*pptr)[i] = POW(ob*U[i][deltabi]+oc*U[i][deltaci], 2);
+		den_k[i] = POW(ob*U[i][deltabi]+oc*U[i][deltaci], 2);
+		vel_k[i] = POW((ob*(eps*U[i][thetabi]+(float)0.5*U[i][hdoti]) + oc*((float) 0.5 * U[i][hdoti]))/k*H, 2.f);
 	}
 	__syncthreads();
 	if (thread == 0) {
-		build_interpolation_function(&func, *pptr, EXP(logkmin), EXP(logkmax));
+		build_interpolation_function(den_k_func, den_k, EXP(logkmin), EXP(logkmax));
+		build_interpolation_function(vel_k_func, vel_k, EXP(logkmin), EXP(logkmax));
 	}
 	__syncthreads();
 	if (thread == 0) {
-		delete[] pptr;
+		delete dptr;
+		delete vptr;
 	}
-	return func;
 }
 
 #endif /* GPUTIGER_BOLTZMANN_HPP_ */

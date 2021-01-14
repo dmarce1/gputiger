@@ -89,7 +89,6 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 			} else {
 				err = REAL(0.0);
 			}
-			printf("%e %e\n", sum1, sum2);
 			*result = sum2;
 		}
 		break;

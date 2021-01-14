@@ -119,8 +119,10 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	__shared__
 	float *result_ptr;
 	__shared__ sigma8_integrand *func_ptr;
-	__shared__ interp_functor<float>* interp;
+	__shared__ interp_functor<float>* den_k;
+	__shared__ interp_functor<float>* vel_k;
 	__shared__ cos_state* states;
+	__shared__ cmplx* basis;
 	if (thread == 0) {
 		zeroverse_ptr = new zero_order_universe;
 		create_zero_order_universe(zeroverse_ptr, opts, 1.0);
@@ -130,13 +132,15 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	float kmin = 2.0 * (float) M_PI / opts.box_size;
 	float kmax = kmin * (float) (opts.Ngrid / 2);
 	kmax *= SQRT(3);
-	int Nk = 1024;
+	int Nk = opts.Ngrid * SQRT(3) + 1;
 	if (thread == 0) {
 		printf("\nNormalizing Einstein Boltzman solutsions to a present day sigma8 of %e\n", opts.sigma8);
 		result_ptr = new float;
 		func_ptr = new sigma8_integrand;
-		CUDA_CHECK(cudaMalloc(&states,sizeof(cos_state)*Nk));
-		interp = new interp_functor<float>;
+		CUDA_CHECK(cudaMalloc(&states, sizeof(cos_state) * Nk));
+		den_k = new interp_functor<float>;
+		vel_k = new interp_functor<float>;
+		basis = new cmplx[opts.Ngrid / 2];
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
 		integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
@@ -155,47 +159,58 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
 	}
+	cmplx* rands = arena.cmplx_space + opts.Ngrid * opts.Ngrid * opts.Ngrid;
+	fft_basis(basis, opts.Ngrid);
+	generate_random_normals(rands, opts.Ngrid * opts.Ngrid * opts.Ngrid);
 	einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
 	int iter = 0;
 	float dloga = 1.f;
 	float loga = LOG(zeroverse_ptr->amin);
 	float drho, last_drho;
-	for (; loga < LOG(zeroverse_ptr->amax) - dloga; loga += dloga) {
-		if( iter > 1 ) {
-			if( abs(LOG(drho/last_drho)) > 0.01 ) {
-				dloga *= min((opts.max_overden - drho) / (drho - last_drho)/2.,1.f) ;
+	einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, 1.0/(40.0+1.0));
+/*	for (; loga < LOG(zeroverse_ptr->amax) - dloga; loga += dloga) {
+		if (iter > 1) {
+			if (abs(LOG(drho / last_drho)) > 0.01) {
+				dloga *= min((opts.max_overden - drho) / (drho - last_drho) / 4., 1.f);
 			}
 		}
 		float amin = EXP(loga);
 		float amax = EXP(loga + dloga);
-		if( thread == 0 ) {
-			printf("Advancing Einstein Boltzmann solutions from redshift %.1f to %.1f\n", 1/amin-1, 1/amax-1);
+		if (thread == 0) {
+			printf("Advancing Einstein Boltzmann solutions from redshift %.1f to %.1f\n", 1 / amin - 1, 1 / amax - 1);
 		}
-		auto tmp = einstein_boltzmann_interpolation_function(states, zeroverse_ptr, kmin, kmax, Nk, amin, amax);
-		if( thread == 0 ) {
-			*interp = std::move(tmp);
-		}
+		einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, amin, amax);
 		__syncthreads();
 		last_drho = drho;
-		drho = zeldovich_overdensity(*interp, opts.box_size, opts.Ngrid);
+		drho = zeldovich_overdensity(basis, rands, *den_k, opts.box_size, opts.Ngrid);
 		__syncthreads();
-		if( thread == 0 ) {
-			printf( "Maximum over/under density is %e\n", drho);
+		if (thread == 0) {
+			printf("Maximum over/under density is %e\n", drho);
 		}
-		if( drho > opts.max_overden ) {
+		if (drho > opts.max_overden) {
 			break;
 		}
 		__syncthreads();
 		iter++;
-	}
+	}*/
 	__syncthreads();
+	for (int dim = 0; dim < NDIM; dim++) {
+		cmplx* phi = arena.cmplx_space;
+		float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, dim);
+		__syncthreads();
+		if (thread == 0) {
+			printf("Maximum %c displacement = %e\n", 'x' + dim, xdisp);
+		}
+	}
 
 	if (thread == 0) {
 		delete zeroverse_ptr;
 		delete result_ptr;
 		delete func_ptr;
 		CUDA_CHECK(cudaFree(states));
-		delete interp;
+		delete den_k;
+		delete vel_k;
+		delete[] basis;
 	}
 }
 
@@ -217,7 +232,7 @@ int main() {
 	params.Theta = 1.0;
 	params.Ngrid = 256;
 	params.sigma8 = 0.8367;
-	params.max_overden = 0.1;
+	params.max_overden = 0.9;
 	params.box_size = 100.0;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
@@ -226,7 +241,7 @@ int main() {
 	params.omega_gam = omega_r - params.omega_nu;
 	arena_t arena;
 	const int N = params.Ngrid;
-	CUDA_CHECK(cudaMalloc(&arena.cmplx_space, 5 * sizeof(cmplx) * N * N * N));
+	CUDA_CHECK(cudaMalloc(&arena.cmplx_space, 2 * sizeof(cmplx) * N * N * N));
 
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, params);
 	CUDA_CHECK(cudaGetLastError());
