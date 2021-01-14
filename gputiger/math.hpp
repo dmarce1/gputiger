@@ -125,7 +125,7 @@ void generate_random_normals(cmplx* nums, int N) {
 	const int& block_size = blockDim.x;
 	uint32_t int1 = a1;
 	uint32_t int2 = a2;
-	for( int i = 0; i < thread; i++) {
+	for( int i = 0; i < 2*(block_size-thread); i++) {
 		int1 *= a1;
 		int2 *= a2;
 		int1 >>= 8;

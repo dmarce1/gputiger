@@ -165,14 +165,14 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 	einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
 	int iter = 0;
 	float dloga = 1.f;
-	float loga = LOG(zeroverse_ptr->amin);
-	float drho, last_drho;
-	einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, 1.0/(40.0+1.0));
-/*	for (; loga < LOG(zeroverse_ptr->amax) - dloga; loga += dloga) {
+	float logamin = LOG(zeroverse_ptr->amin);
+	float logamax = LOG(zeroverse_ptr->amax);
+	float loga = logamin;
+	float drho;
+	float a;
+	for (; loga < LOG(zeroverse_ptr->amax) - dloga; loga += dloga) {
 		if (iter > 1) {
-			if (abs(LOG(drho / last_drho)) > 0.01) {
-				dloga *= min((opts.max_overden - drho) / (drho - last_drho) / 4., 1.f);
-			}
+			dloga = 1.5f * (opts.max_overden-drho) / opts.max_overden;
 		}
 		float amin = EXP(loga);
 		float amax = EXP(loga + dloga);
@@ -181,25 +181,30 @@ void main_kernel(arena_t arena_, cosmic_parameters opts) {
 		}
 		einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, amin, amax);
 		__syncthreads();
-		last_drho = drho;
 		drho = zeldovich_overdensity(basis, rands, *den_k, opts.box_size, opts.Ngrid);
 		__syncthreads();
 		if (thread == 0) {
 			printf("Maximum over/under density is %e\n", drho);
 		}
-		if (drho > opts.max_overden) {
-			break;
+		__syncthreads();
+		if (iter > 0) {
+			if (drho > opts.max_overden) {
+				a = amax;
+				break;
+			}
 		}
 		__syncthreads();
 		iter++;
-	}*/
+	}
 	__syncthreads();
 	for (int dim = 0; dim < NDIM; dim++) {
 		cmplx* phi = arena.cmplx_space;
 		float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, dim);
+		float vmax = zeldovich_displacements(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, dim);
 		__syncthreads();
 		if (thread == 0) {
 			printf("Maximum %c displacement = %e\n", 'x' + dim, xdisp);
+			printf("Maximum %c velocity     = %e\n", 'x' + dim, a*vmax);
 		}
 	}
 
