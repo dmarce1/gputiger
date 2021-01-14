@@ -22,11 +22,9 @@ __device__ void fft_basis(cmplx* X, int N) {
 }
 
 __global__
-void fft3d(cmplx* ptr, const cmplx* expi, int N) {
+void fft3d(cmplx* Y, const cmplx* expi, int N) {
 	const int& thread = threadIdx.x;
 	const int& block_size = blockDim.x;
-	const int& phi_dim = blockIdx.x;
-	cmplx* Y = ptr + phi_dim * N * N * N;
 	int level = 0;
 	for (int i = N; i > 1; i >>= 1) {
 		level++;
