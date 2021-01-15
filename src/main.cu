@@ -1,95 +1,6 @@
-class cmplx {
-	float x, y;
-public:
-	__device__ cmplx() = default;
-	__device__ cmplx(float a) {
-		x = a;
-		y = 0.f;
-	}
-	__device__ cmplx(float a, float b) {
-		x = a;
-		y = b;
-	}
-	__device__ cmplx& operator+=(cmplx other) {
-		x += other.x;
-		y += other.y;
-		return *this;
-	}
-	__device__ cmplx& operator-=(cmplx other) {
-		x -= other.x;
-		y -= other.y;
-		return *this;
-	}
-	__device__ cmplx operator*(cmplx other) const {
-		cmplx a;
-		a.x = x * other.x - y * other.y;
-		a.y = x * other.y + y * other.x;
-		return a;
-	}
-	__device__ cmplx operator/(cmplx other) const {
-		return *this * other.conj() / other.norm();
-	}
-	__device__ cmplx operator/(float other) const {
-		cmplx b;
-		b.x = x / other;
-		b.y = y / other;
-		return b;
-	}
-	__device__ cmplx operator*(float other) const {
-		cmplx b;
-		b.x = x * other;
-		b.y = y * other;
-		return b;
-	}
-	__device__ cmplx operator+(cmplx other) const {
-		cmplx a;
-		a.x = x + other.x;
-		a.y = y + other.y;
-		return a;
-	}
-	__device__ cmplx operator-(cmplx other) const {
-		cmplx a;
-		a.x = x - other.x;
-		a.y = y - other.y;
-		return a;
-	}
-	__device__ cmplx conj() const {
-		cmplx a;
-		a.x = x;
-		a.y = -y;
-		return a;
-	}
-	__device__
-	float real() const {
-		return x;
-	}
-	__device__
-	float imag() const {
-		return y;
-	}
-	__device__
-	float norm() const {
-		return ((*this) * conj()).real();
-	}
-	__device__
-	float abs() const {
-		return sqrtf(norm());
-	}
-	__device__ cmplx operator-() const {
-		cmplx a;
-		a.x = -x;
-		a.y = -y;
-		return a;
-	}
-};
-
-__device__ cmplx operator*(float a, cmplx b) {
-	return b * a;
-}
-
+#include <gputiger/math.hpp>
 #include <nvfunctional>
 #include <gputiger/chemistry.hpp>
-#include <gputiger/options.hpp>
 #include <gputiger/constants.hpp>
 #include <gputiger/util.hpp>
 #include <gputiger/zero_order.hpp>
@@ -119,6 +30,7 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 	const int N3 = N * N * N;
 	cmplx* phi = (cmplx*) arena;
 	cmplx* rands = ((cmplx*) arena) + N3;
+	particle* parts = (particle*) arena;
 	if (thread == 0) {
 		zeroverse_ptr = new zero_order_universe;
 		create_zero_order_universe(zeroverse_ptr, opts, 1.0);
@@ -165,10 +77,8 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 	__syncthreads();
 	einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
 	int iter = 0;
-	float dloga = 2.f;
 	float logamin = LOG(zeroverse_ptr->amin);
 	float logamax = LOG(zeroverse_ptr->amax);
-	float loga = logamin;
 	float drho;
 	float last_drho;
 	float last_a;
@@ -193,7 +103,6 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		__syncthreads();
 		if (iter > 0) {
 			if (drho > opts.max_overden) {
-				tau -= dtau;
 				drho = last_drho;
 				break;
 			}
@@ -241,7 +150,9 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		}
 		__syncthreads();
 	}
-	__syncthreads();
+	if( thread == 0 ) {
+		printf( "Transferring data from host\n");
+	}
 	for (int ij = thread; ij < N * N; ij += block_size) {
 		int i = ij / N;
 		int j = ij % N;
@@ -251,6 +162,16 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		}
 	}
 	__syncthreads();
+	for( int i = thread; i < N3; i+= block_size) {
+		parts[i] = host_parts[i];
+		for( int dim = 0; dim < NDIM; dim++) {
+			parts[i].v[dim] *= a;
+		}
+	}
+	__syncthreads();
+	if( thread == 0 ) {
+		printf( "Done. Begining non-linear evolution\n");
+	}
 	if (thread == 0) {
 		delete zeroverse_ptr;
 		delete result_ptr;
@@ -282,8 +203,8 @@ int main() {
 	params.Theta = 1.0;
 	params.Ngrid = 256;
 	params.sigma8 = 0.8367;
-	params.max_overden = 0.9;
-	params.box_size = 100.0;
+	params.max_overden = 1.0;
+	params.box_size = 613.0/2160.0*params.Ngrid;
 	params.nout = 64;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
@@ -296,7 +217,7 @@ int main() {
 	particle* parts_device;
 	CUDA_CHECK(cudaHostAlloc(&parts_ptr, sizeof(particle) * N3, cudaHostAllocMapped));
 	CUDA_CHECK(cudaHostGetDevicePointer(&parts_device, parts_ptr, 0));
-	CUDA_CHECK(cudaMalloc(&arena, 2 * sizeof(cmplx) * N3));
+	CUDA_CHECK(cudaMalloc(&arena, 8 * sizeof(float) * N3));
 
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_device, params);
 	CUDA_CHECK(cudaGetLastError());

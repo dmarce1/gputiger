@@ -8,34 +8,127 @@
 #ifndef GPUTIGER_MATH_HPP_
 #define GPUTIGER_MATH_HPP_
 
-#include <gputiger/vector.hpp>
-#include <gputiger/params.hpp>
 #include <nvfunctional>
 #include <cstdio>
+#include <cstdint>
+#include <gputiger/vector.hpp>
+#include <gputiger/params.hpp>
+
+
+#define POW(a,b) powf(a,b)
+#define LOG(a) logf(a)
+#define EXP(a) expf(a)
+#define SQRT(a) sqrtf(a)
+#define COS(a) cosf(a)
+#define SIN(a) sinf(a)
+#define SINCOS(a,b,c) sincosf(a,b,c)
+
+
+
+class cmplx {
+	float x, y;
+public:
+	__device__ cmplx() = default;
+	__device__ cmplx(float a) {
+		x = a;
+		y = 0.f;
+	}
+	__device__ cmplx(float a, float b) {
+		x = a;
+		y = b;
+	}
+	__device__ cmplx& operator+=(cmplx other) {
+		x += other.x;
+		y += other.y;
+		return *this;
+	}
+	__device__ cmplx& operator-=(cmplx other) {
+		x -= other.x;
+		y -= other.y;
+		return *this;
+	}
+	__device__ cmplx operator*(cmplx other) const {
+		cmplx a;
+		a.x = x * other.x - y * other.y;
+		a.y = x * other.y + y * other.x;
+		return a;
+	}
+	__device__ cmplx operator/(cmplx other) const {
+		return *this * other.conj() / other.norm();
+	}
+	__device__ cmplx operator/(float other) const {
+		cmplx b;
+		b.x = x / other;
+		b.y = y / other;
+		return b;
+	}
+	__device__ cmplx operator*(float other) const {
+		cmplx b;
+		b.x = x * other;
+		b.y = y * other;
+		return b;
+	}
+	__device__ cmplx operator+(cmplx other) const {
+		cmplx a;
+		a.x = x + other.x;
+		a.y = y + other.y;
+		return a;
+	}
+	__device__ cmplx operator-(cmplx other) const {
+		cmplx a;
+		a.x = x - other.x;
+		a.y = y - other.y;
+		return a;
+	}
+	__device__ cmplx conj() const {
+		cmplx a;
+		a.x = x;
+		a.y = -y;
+		return a;
+	}
+	__device__
+	float real() const {
+		return x;
+	}
+	__device__
+	float imag() const {
+		return y;
+	}
+	__device__
+	float norm() const {
+		return ((*this) * conj()).real();
+	}
+	__device__
+	float abs() const {
+		return sqrtf(norm());
+	}
+	__device__ cmplx operator-() const {
+		cmplx a;
+		a.x = -x;
+		a.y = -y;
+		return a;
+	}
+};
+
+
+__device__ inline cmplx operator*(float a, cmplx b) {
+	return b * a;
+}
+
+
+
+__device__ inline cmplx expc(cmplx z) {
+	float x, y;
+	float t = EXP(z.real());
+	SINCOS(z.imag(), &y, &x);
+	x *= t;
+	y *= t;
+	return cmplx(x, y);
+}
+
 
 __device__
-static double find_root(nvstd::function<double(double)> f) {
-	double x = 0.5;
-	double err;
-	int iters = 0;
-	do {
-		double dx0 = x * 1.0e-6;
-		if (abs(dx0) == 0.0) {
-			dx0 = 1.0e-10;
-		}
-		double fx = f(x);
-		double dfdx = (f(x + dx0) - fx) / dx0;
-		double dx = -fx / dfdx;
-		err = abs(dx / max(1.0, abs(x)));
-		x += 0.5 * dx;
-		iters++;
-		if (iters > 100000) {
-			printf("Finished early with error = %e\n", err);
-			break;
-		}
-	} while (err > 1.0e-12);
-	return x;
-}
+double find_root(nvstd::function<double(double)> f) ;
 
 template<class FUNC, class REAL>
 __global__
@@ -105,44 +198,7 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 
 }
 
-__device__ cmplx expc(cmplx z) {
-	float x, y;
-	float t = EXP(z.real());
-	SINCOS(z.imag(), &y, &x);
-	x *= t;
-	y *= t;
-	return cmplx(x, y);
-}
-
 __device__
-void generate_random_normals(cmplx* nums, int N) {
-	uint64_t mod = 1LL << 31LL;
-	uint64_t a1 = 1664525LL;
-	uint64_t a2 = 1103515245LL;
-	uint64_t c1 = 1013904223LL;
-	uint64_t c2 = 12345LL;
-	const int& thread = threadIdx.x;
-	const int& block_size = blockDim.x;
-	uint32_t int1 = a1;
-	uint32_t int2 = a2;
-	for( int i = 0; i < 2*(block_size-thread); i++) {
-		int1 *= a1;
-		int2 *= a2;
-		int1 >>= 8;
-		int2 >>= 8;
-	}
-	int1 = int1 % mod;
-	int2 = int2 % mod;
-	for (int i = thread; i < N; i += block_size) {
-		int1 = (a1 * (uint64_t) int1 + c1) % mod;
-		int2 = (a2 * (uint64_t) int2 + c2) % mod;
-		float x1 = ((float) int1 + 0.5f) / (float) uint64_t(mod + uint64_t(1));
-		float y1 = ((float) int2 + 0.5f) / (float) uint64_t(mod + uint64_t(1));
-		float x = x1;
-		float y = 2.f * (float) M_PI * y1;
-		nums[i] = SQRT(-LOG(abs(x))) * expc(cmplx(0, 1) * y);
-	}
-	__syncthreads();
-}
+void generate_random_normals(cmplx* nums, int N);
 
 #endif /* GPUTIGER_MATH_HPP_ */
