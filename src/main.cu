@@ -7,6 +7,8 @@
 #include <gputiger/boltzmann.hpp>
 #include <gputiger/zeldovich.hpp>
 #include <gputiger/particle.hpp>
+#include <gputiger/stack.hpp>
+#include <gputiger/mutex.hpp>
 
 #define BLOCK_SIZE 256
 

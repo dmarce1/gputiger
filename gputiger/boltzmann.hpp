@@ -37,9 +37,10 @@
 
 #define NFIELD (6+(3*LMAX))
 
-using cos_state = array<float,NFIELD>;
-
+#include <gputiger/array.hpp>
 #include <gputiger/zero_order.hpp>
+
+using cos_state = array<float,NFIELD>;
 
 __device__ void einstein_boltzmann_init(cos_state* uptr, const zero_order_universe* uni_ptr, float k,
 		float normalization, float a);
