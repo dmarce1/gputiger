@@ -23,6 +23,10 @@ public:
 		data.resize(data.size()-1);
 	}
 	__device__
+	size_t size() const {
+		return data.size();
+	}
+	__device__
 	T& top() {
 		return data.back();
 	}

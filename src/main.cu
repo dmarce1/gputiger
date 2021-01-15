@@ -9,6 +9,7 @@
 #include <gputiger/particle.hpp>
 #include <gputiger/stack.hpp>
 #include <gputiger/mutex.hpp>
+#include <gputiger/tree.hpp>
 
 #define BLOCK_SIZE 256
 
@@ -152,8 +153,8 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		}
 		__syncthreads();
 	}
-	if( thread == 0 ) {
-		printf( "Transferring data from host\n");
+	if (thread == 0) {
+		printf("Transferring data from host\n");
 	}
 	for (int ij = thread; ij < N * N; ij += block_size) {
 		int i = ij / N;
@@ -164,21 +165,39 @@ void main_kernel(void* arena, particle* host_parts, cosmic_parameters opts) {
 		}
 	}
 	__syncthreads();
-	for( int i = thread; i < N3; i+= block_size) {
+	for (int i = thread; i < N3; i += block_size) {
 		parts[i] = host_parts[i];
-		for( int dim = 0; dim < NDIM; dim++) {
+		for (int dim = 0; dim < NDIM; dim++) {
 			parts[i].v[dim] *= a;
 		}
 	}
+
+	__shared__ tree* root;
+	__shared__ range<pos_type> root_range;
 	__syncthreads();
-	if( thread == 0 ) {
-		printf( "Done. Begining non-linear evolution\n");
+	if (thread == 0) {
+		printf("Done. Begining non-linear evolution\n");
+		tree_params tparams;
+		tparams.parts_per_bucket = 64;
+		tparams.kernel_depth = 3;
+		tree::initialize(tparams, (tree*) (arena + N3 * sizeof(float) * 8), N3 * sizeof(float) * 4);
+		CUDA_CHECK(cudaMalloc(&root, sizeof(tree)));
 	}
+	__syncthreads();
+	if (thread < 3) {
+		root_range.begin[thread] = 0x80000000;
+		root_range.end[thread] = 0x7FFFFFFF;
+	}
+	__syncthreads();
+
+	root->sort(parts, parts + N3, root_range, 0);
+
 	if (thread == 0) {
 		delete zeroverse_ptr;
 		delete result_ptr;
 		delete func_ptr;
 		CUDA_CHECK(cudaFree(states));
+		CUDA_CHECK(cudaFree(root));
 		delete den_k;
 		delete vel_k;
 		delete[] basis;
@@ -206,7 +225,7 @@ int main() {
 	params.Ngrid = 256;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
-	params.box_size = 613.0/2160.0*params.Ngrid;
+	params.box_size = 613.0 / 2160.0 * params.Ngrid;
 	params.nout = 64;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
@@ -219,8 +238,7 @@ int main() {
 	particle* parts_device;
 	CUDA_CHECK(cudaHostAlloc(&parts_ptr, sizeof(particle) * N3, cudaHostAllocMapped));
 	CUDA_CHECK(cudaHostGetDevicePointer(&parts_device, parts_ptr, 0));
-	CUDA_CHECK(cudaMalloc(&arena, 8 * sizeof(float) * N3));
-
+	CUDA_CHECK(cudaMalloc(&arena, 12 * sizeof(float) * N3));
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_device, params);
 	CUDA_CHECK(cudaGetLastError());
 

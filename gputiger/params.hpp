@@ -9,8 +9,11 @@
 #define GPUTIGER_PARAMS_HPP_
 
 #include <nvfunctional>
+#include <cstdio>
+
 
 #define NDIM 3
+#define NCHILD (1<<NDIM)
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
 
