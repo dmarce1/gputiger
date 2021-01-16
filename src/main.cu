@@ -261,6 +261,7 @@ int main() {
 	params.nout = 64;
 	params.max_kernel_depth = 3;
 	params.parts_per_bucket = 64;
+	params.opening_crit = 0.7;
 	params.nparts = params.Ngrid*params.Ngrid*params.Ngrid;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)

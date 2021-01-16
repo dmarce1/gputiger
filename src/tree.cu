@@ -1,7 +1,8 @@
 #include <gputiger/tree.hpp>
+#include <gputiger/math.hpp>
 
 __device__
-                 static tree** arena;
+                               static tree** arena;
 
 __device__
 static int next_index;
@@ -16,7 +17,7 @@ __device__
 static int active_count;
 
 __device__
- static particle* part_begin;
+               static particle* part_base;
 
 struct tree_sort_type {
 	array<tree*, NCHILD> tree_ptrs;
@@ -39,7 +40,7 @@ void tree::initialize(particle* parts, void* data, size_t bytes) {
 	for (int i = 0; i < N; i++) {
 		arena[i] = ptrs + i;
 	}
-	::part_begin = parts;
+	::part_base = parts;
 	printf("Done allocating trees\n");
 }
 
@@ -263,7 +264,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				}
 				if (p->rung >= rung) {
 					int index = atomicAdd(&active_count, 1);
-					active_list[index] = (p - part_begin);
+					active_list[index] = (p - part_base);
 				}
 			}
 			for (int P = block_size / 2; P >= 1; P /= 2) {
@@ -285,9 +286,129 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 		}
 		__syncthreads();
 	}
-	if (tid == 0) {
-		pole.radius = (box.end[0] - box.begin[0]) / 2;
-	}
 	__syncthreads();
 	return pole;
 }
+
+#define KICKWARPSIZE 32
+#define KICKBLOCKSIZE 128
+
+__global__
+void tree_kick(tree* root, int baseindex, int rung, float dt) {
+	const int myindex = baseindex + blockIdx.x * blockDim.x + threadIdx.x;
+	const float theta2 = POW(opts.opening_crit, 2);
+	vector<tree*> directs;
+	if (myindex < active_count) {
+		int depth;
+		particle& part = *(part_base + active_list[myindex]);
+		tree* pointers[MAXDEPTH];
+		int child_indexes[MAXDEPTH];
+		for (int i = 0; i < MAXDEPTH; i++) {
+			child_indexes[i] = 0;
+		}
+		pointers[0] = root;
+		depth = 0;
+		do {
+			auto& other = *(pointers[depth]);
+			array<pos_type, NDIM> other_x = other.pole.xcom;
+			uint64_t w = other.box.end[0] - other.box.begin[0];
+			uint64_t dist2 = 0;
+			for (int dim = 0; dim < NDIM; dim++) {
+				int64_t dist = part.x[dim] - other_x[dim];
+				dist2 += dist * dist;
+			}
+			bool opened = float(w * w) > theta2 * float(dist2);
+			if (opened && pointers[depth]->leaf) {
+				directs.push_back(pointers[depth]);
+			}
+			if (!opened) {
+
+				// Do indirect
+
+			}
+
+			if (!opened || pointers[depth]->leaf) {
+				do {
+					depth--;
+					child_indexes[depth]++;
+				} while (child_indexes[depth] == NCHILD && depth != 0);
+			}
+			depth++;
+			child_indexes[depth] = 0;
+
+			pointers[depth] = pointers[depth - 1]->children[child_indexes[depth - 1]];
+		} while (depth);
+	}
+	__syncthreads();
+	if (myindex < active_count) {
+		int depth;
+		particle& part = *(part_base + active_list[myindex]);
+		tree* pointers[MAXDEPTH];
+		int child_indexes[MAXDEPTH];
+		for (int i = 0; i < MAXDEPTH; i++) {
+			child_indexes[i] = 0;
+		}
+		pointers[0] = root;
+		depth = 0;
+		do {
+			auto& other = *(pointers[depth]);
+			array<pos_type, NDIM> other_x = other.pole.xcom;
+			uint64_t w = other.box.end[0] - other.box.begin[0];
+			uint64_t dist2 = 0;
+			for (int dim = 0; dim < NDIM; dim++) {
+				int64_t dist = part.x[dim] - other_x[dim];
+				dist2 += dist * dist;
+			}
+			dist2 = max(dist2, int64_t(1) << int64_t(60));
+			bool opened = float(w * w) > theta2 * float(dist2);
+			if (opened && pointers[depth]->leaf) {
+				printf("Error - ewald should not be direct\n");
+				__trap();
+			}
+			if (!opened) {
+
+				// Do indirect ewald
+
+			}
+
+			if (!opened || pointers[depth]->leaf) {
+				do {
+					depth--;
+					child_indexes[depth]++;
+				} while (child_indexes[depth] == NCHILD && depth != 0);
+			}
+			depth++;
+			child_indexes[depth] = 0;
+
+			pointers[depth] = pointers[depth - 1]->children[child_indexes[depth - 1]];
+		} while (depth);
+	}
+	__syncthreads();
+	if (myindex < active_count) {
+		int part_index = 0;
+		int tree_index = 0;
+		particle* other = directs[tree_index]->part_begin;
+		while (tree_index < directs.size()) {
+
+			// Do direct
+
+			part_index++;
+			if (other + part_index == directs[tree_index]->part_end) {
+				part_index = 0;
+				tree_index++;
+			}
+		}
+	}
+	__syncthreads();
+
+}
+
+__device__
+void tree::kick(tree* root, int rung, float dt) {
+	for (int i = 0; i < active_count; i += KICKBLOCKSIZE * KICKWARPSIZE) {
+		tree_kick<<<KICKBLOCKSIZE,KICKWARPSIZE>>>(root,i, rung,dt);
+		CUDA_CHECK(cudaDeviceSynchronize());
+	}
+
+}
+

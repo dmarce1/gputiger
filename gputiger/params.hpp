@@ -25,6 +25,7 @@ struct options {
 	float max_overden;
 	float h;
 	float Y;
+	float opening_crit;
 	float Theta;
 	float omega_b;
 	float omega_nu;

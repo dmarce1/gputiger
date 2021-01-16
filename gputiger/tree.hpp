@@ -23,7 +23,7 @@ struct sort_workspace {
 	int count[WARPSIZE];
 };
 
-class tree {
+struct tree {
 	array<tree*, NCHILD> children;
 	range<pos_type> box;
 	monopole pole;
@@ -31,13 +31,18 @@ class tree {
 	particle* part_end;
 	int depth;
 	bool leaf;
-public:
+
 	__device__
 	static void initialize(particle* parts, void* arena, size_t bytes);
 	__device__
 	  static tree* alloc();
 	__device__
 	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range<pos_type>,  int depth, int rung);
+	__device__
+	void kick(tree* root, int rung, float dt);
+	__global__
+	friend void tree_kick(tree* root, int rung, float dt);
+
 };
 
 
