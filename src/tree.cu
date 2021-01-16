@@ -101,8 +101,8 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 	pos_type midx;
 	particle* mid;
 	__syncthreads();
-	if (tid == 0) {
-		/*		for (auto* ptr = part_begin; ptr < part_end; ptr++) {
+	/*if (tid == 0) {
+				for (auto* ptr = part_begin; ptr < part_end; ptr++) {
 		 if (!box.in_range(ptr->x)) {
 		 printf("Particle out of range at depth %i\n", depth);
 		 for (int dim = 0; dim < NDIM; dim++) {
@@ -111,9 +111,9 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 		 printf("\n");
 		 __trap();
 		 }
-		 }*/
+		 }
 		printf("Sorting at depth %i\n", depth);
-	}
+	}*/
 
 	__syncthreads();
 	if (pend - pbegin > opts.parts_per_bucket) {
