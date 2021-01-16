@@ -211,7 +211,6 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	}
 	__syncthreads();
 	if (thread == 0) {
-		printf("Done Sorting\n");
 		CUDA_CHECK(cudaDeviceSynchronize());
 	}
 	__syncthreads();
@@ -244,6 +243,10 @@ int main() {
 	particle* parts_ptr;
 	printf("Stack Size = %li\n", stack_size);
 
+	struct cudaDeviceProp prop;
+	CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
+	params.clock_rate = prop.clockRate * pow(1024/1000,3) * 1000;
+	printf( "Clock rate = %e\n", params.clock_rate);
 	params.h = 0.697;
 	params.Neff = 3.84;
 	params.Y = 0.24;
@@ -266,16 +269,14 @@ int main() {
 	void* arena;
 	const int N = params.Ngrid;
 	const int N3 = N * N * N;
-	particle* parts_device;
-	CUDA_CHECK(cudaHostAlloc(&parts_ptr, sizeof(particle) * N3, cudaHostAllocMapped));
-	CUDA_CHECK(cudaHostGetDevicePointer(&parts_device, parts_ptr, 0));
+	CUDA_CHECK(cudaMallocManaged(&parts_ptr, sizeof(particle) * N3));
 	size_t arena_size = 10 * sizeof(float) * N3;
-	printf( "Allocating arena of %li Mbytes\n", (arena_size/1024/1024));
+	printf("Allocating arena of %li Mbytes\n", (arena_size / 1024 / 1024));
 	CUDA_CHECK(cudaMalloc(&arena, arena_size));
-	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_device, params);
+	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, params);
 	CUDA_CHECK(cudaGetLastError());
 
 	CUDA_CHECK(cudaDeviceSynchronize());
 	CUDA_CHECK(cudaFree(arena));
-	CUDA_CHECK(cudaFreeHost(parts_ptr));
+	CUDA_CHECK(cudaFree(parts_ptr));
 }

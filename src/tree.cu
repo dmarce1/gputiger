@@ -1,7 +1,7 @@
 #include <gputiger/tree.hpp>
 
 __device__
-                      static tree** arena;
+                       static tree** arena;
 
 __device__
 static int next_index;
@@ -102,21 +102,22 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 	particle* mid;
 	__syncthreads();
 	if (tid == 0) {
-/*		for (auto* ptr = part_begin; ptr < part_end; ptr++) {
-			if (!box.in_range(ptr->x)) {
-				printf("Particle out of range at depth %i\n", depth);
-				for (int dim = 0; dim < NDIM; dim++) {
-					printf("%i %i %i\n", box.begin[dim], box.end[dim], ptr->x[dim]);
-				}
-				printf("\n");
-				__trap();
-			}
-		}*/
+		/*		for (auto* ptr = part_begin; ptr < part_end; ptr++) {
+		 if (!box.in_range(ptr->x)) {
+		 printf("Particle out of range at depth %i\n", depth);
+		 for (int dim = 0; dim < NDIM; dim++) {
+		 printf("%i %i %i\n", box.begin[dim], box.end[dim], ptr->x[dim]);
+		 }
+		 printf("\n");
+		 __trap();
+		 }
+		 }*/
 		printf("Sorting at depth %i\n", depth);
 	}
 
 	__syncthreads();
 	if (pend - pbegin > opts.parts_per_bucket) {
+//		auto tm = clock();
 		midx = (box.begin[2] / pos_type(2) + box.end[2] / pos_type(2));
 		mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, pbegin, pend, midx, 2);
 		if (tid == 0) {
@@ -160,6 +161,10 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 			}
 		}
 		__syncthreads();
+//		float sort_time = ((float) clock() - (float) tm) / opts.clock_rate;
+//		if( tid == 0 && depth < 2 ) {
+	//		printf( "Sort time = %f\n", sort_time );
+//		}
 		box.split(workspace->cranges);
 		if (depth > opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {

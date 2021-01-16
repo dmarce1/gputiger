@@ -30,6 +30,7 @@ struct options {
 	float omega_c;
 	float Neff;
 	float sigma8;
+	float clock_rate;
 	int nout;
 	int Ngrid;
 	float box_size;
