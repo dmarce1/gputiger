@@ -10,6 +10,7 @@
 
 #include <gputiger/particle.hpp>
 #include <gputiger/range.hpp>
+#include <gputiger/monopole.hpp>
 
 
 struct sort_workspace {
@@ -18,15 +19,16 @@ struct sort_workspace {
 	array<range<pos_type>, NCHILD> cranges;
 	int hi;
 	int lo;
+	array<int64_t, NDIM> poles[WARPSIZE];
+	int count[WARPSIZE];
 };
 
 class tree {
 	array<tree*, NCHILD> children;
-	array<pos_type, NDIM> xcom;
 	range<pos_type> box;
+	monopole pole;
 	particle* part_begin;
 	particle* part_end;
-	float mass;
 	int depth;
 	bool leaf;
 public:
@@ -35,7 +37,7 @@ public:
 	__device__
 	  static tree* alloc();
 	__device__
-	void sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range<pos_type>,  int depth);
+	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range<pos_type>,  int depth);
 	__device__
 	void destroy();
 };

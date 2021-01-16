@@ -1,13 +1,21 @@
 #include <gputiger/tree.hpp>
 
 __device__
-                       static tree** arena;
+              static tree** arena;
 
 __device__
 static int next_index;
 
 __device__
 static int arena_size;
+
+struct tree_sort_type {
+	array<tree*, NCHILD> tree_ptrs;
+	array<range<pos_type>, NCHILD> boxes;
+	array<particle*, NCHILD> begins;
+	array<particle*, NCHILD> ends;
+	array<monopole, NCHILD> poles;
+};
 
 __device__
 void tree::initialize(void* data, size_t bytes) {
@@ -62,13 +70,6 @@ __device__ particle* sort_parts(int* lo, int* hi, particle* swap, particle* b, p
 	}
 }
 
-struct tree_sort_type {
-	array<tree*, NCHILD> tree_ptrs;
-	array<range<pos_type>, NCHILD> boxes;
-	array<particle*, NCHILD> begins;
-	array<particle*, NCHILD> ends;
-};
-
 __global__
 void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range<pos_type> box) {
 	__shared__ sort_workspace spaces[MAXDEPTH];
@@ -84,13 +85,14 @@ void tree_sort(tree_sort_type* trees, particle* swap_space, int depth) {
 	particle* e = trees->ends[bid];
 	particle* this_swap = swap_space + (b - base);
 	range<pos_type> box = trees->boxes[bid];
-	trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth);
+	trees->poles[bid] = trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth);
 	__syncthreads();
 }
 
-__device__ void tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
+__device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
 		range<pos_type> box_, int depth_) {
 	const int& tid = threadIdx.x;
+	const int& block_size = blockDim.x;
 	if (tid == 0) {
 		part_begin = pbegin;
 		part_end = pend;
@@ -102,18 +104,18 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 	particle* mid;
 	__syncthreads();
 	/*if (tid == 0) {
-				for (auto* ptr = part_begin; ptr < part_end; ptr++) {
-		 if (!box.in_range(ptr->x)) {
-		 printf("Particle out of range at depth %i\n", depth);
-		 for (int dim = 0; dim < NDIM; dim++) {
-		 printf("%i %i %i\n", box.begin[dim], box.end[dim], ptr->x[dim]);
-		 }
-		 printf("\n");
-		 __trap();
-		 }
-		 }
-		printf("Sorting at depth %i\n", depth);
-	}*/
+	 for (auto* ptr = part_begin; ptr < part_end; ptr++) {
+	 if (!box.in_range(ptr->x)) {
+	 printf("Particle out of range at depth %i\n", depth);
+	 for (int dim = 0; dim < NDIM; dim++) {
+	 printf("%i %i %i\n", box.begin[dim], box.end[dim], ptr->x[dim]);
+	 }
+	 printf("\n");
+	 __trap();
+	 }
+	 }
+	 printf("Sorting at depth %i\n", depth);
+	 }*/
 
 	__syncthreads();
 	if (pend - pbegin > opts.parts_per_bucket) {
@@ -152,26 +154,28 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 		}
 		__syncthreads();
 		if (tid == 0) {
-//			for( int l = 0; l < NCHILD; l++) {
-//				printf( "%li %li\n", ((long)begin[l] - (long)part_begin),((long)end[l] -(long) part_begin));
-//			}
-//			__trap();
 			for (int ci = 0; ci < NCHILD; ci++) {
 				children[ci] = alloc();
 			}
 		}
 		__syncthreads();
-//		float sort_time = ((float) clock() - (float) tm) / opts.clock_rate;
-//		if( tid == 0 && depth < 2 ) {
-	//		printf( "Sort time = %f\n", sort_time );
-//		}
 		box.split(workspace->cranges);
+		int64_t count = 0;
 		if (depth > opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {
 				particle* swap_base = swap_space + (workspace->begin[ci] - workspace->begin[0]);
-				children[ci]->sort(workspace + 1, swap_base, workspace->begin[ci], workspace->end[ci],
-						workspace->cranges[ci], depth + 1);
+				monopole this_pole = children[ci]->sort(workspace + 1, swap_base, workspace->begin[ci],
+						workspace->end[ci], workspace->cranges[ci], depth + 1);
+				if (tid == 0) {
+					count += this_pole.mass;
+				}
+				__syncthreads();
+				if (tid < NDIM) {
+					workspace->poles[ci][tid] = this_pole.xcom[tid];
+				}
+				__syncthreads();
 			}
+			__syncthreads();
 		} else {
 			__shared__ tree_sort_type* childdata;
 			if (tid == 0) {
@@ -187,10 +191,10 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 			__syncthreads();
 			if (tid == 0) {
 				int threadcnt;
-				if( depth == opts.max_kernel_depth) {
-					threadcnt = opts.parts_per_bucket;
+				if (depth == opts.max_kernel_depth) {
+					threadcnt = WARPSIZE;
 				} else {
-					threadcnt = min((int)((part_end - part_begin) / NCHILD), (int)MAXTHREADCOUNT);
+					threadcnt = min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT);
 				}
 				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1);
 				CUDA_CHECK(cudaGetLastError());
@@ -201,15 +205,71 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 				CUDA_CHECK(cudaFree(childdata));
 			}
 			__syncthreads();
+			if (tid < NCHILD) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					workspace->poles[tid][dim] = childdata->poles[tid].xcom[dim];
+				}
+				if (tid == 0) {
+					count += childdata->poles[tid].mass;
+				}
+			}
+			__syncthreads();
+		}
+		for (int P = NCHILD / 2; P >= 1; P /= 2) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				if (tid < P) {
+					for (int dim = 0; dim < NDIM; dim++) {
+						workspace->poles[tid][dim] += workspace->poles[tid + P][dim];
+					}
+				}
+			}
+			__syncthreads();
+		}
+		if (tid == 0) {
+			pole.mass = count;
+		}
+		__syncthreads();
+		if (tid < NDIM) {
+			pole.xcom[tid] = workspace->poles[0][tid] / count;
 		}
 		__syncthreads();
 	} else {
 		if (tid == 0) {
 			leaf = true;
-//			printf("leaf node at depth %i with %li particles\n", depth, part_end - part_begin);
 		}
+		if (tid < WARPSIZE) {
+			auto& poles = workspace->poles[tid];
+			auto& count = workspace->count[tid];
+			for (int dim = 0; dim < NDIM; dim++) {
+				poles[dim] = 0;
+			}
+			count = 0;
+			for (particle* p = part_begin + tid; p < part_end; p += block_size) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					poles[dim] += p->x[dim];
+				}
+			}
+			for (int P = block_size / 2; P >= 1; P /= 2) {
+				if (tid < P) {
+					for (int dim = 0; dim < NDIM; dim++) {
+						poles[dim] += workspace->poles[tid + P][dim];
+					}
+				}
+				__syncthreads();
+			}
+			if (tid == 0) {
+				pole.mass = count;
+			}
+			__syncthreads();
+			if (tid < NDIM) {
+				pole.xcom[tid] = pos_type(poles[tid] / pole.mass);
+			}
+			__syncthreads();
+		}
+		__syncthreads();
 	}
 	__syncthreads();
+	return pole;
 }
 
 __device__ void tree::destroy() {
