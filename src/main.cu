@@ -206,11 +206,12 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Sorting\n");
-		root_tree_sort<<<1,NCHILD>>>(root, parts, parts+N3, root_range);
+		root_tree_sort<<<1,512>>>(root, host_parts, parts, parts+N3, root_range);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
 	if (thread == 0) {
+		printf("Done Sorting\n");
 		CUDA_CHECK(cudaDeviceSynchronize());
 	}
 	__syncthreads();

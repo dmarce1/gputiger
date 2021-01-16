@@ -1,13 +1,13 @@
 #include <gputiger/tree.hpp>
 
 __device__
-               static tree** arena;
+                      static tree** arena;
 
 __device__
-               static int next_index;
+static int next_index;
 
 __device__
-               static int arena_size;
+static int arena_size;
 
 __device__
 void tree::initialize(void* data, size_t bytes) {
@@ -16,7 +16,7 @@ void tree::initialize(void* data, size_t bytes) {
 	next_index = 0;
 	arena_size = N;
 	tree* ptrs = (tree*) data;
-	arena = (tree**) (data + sizeof(tree)*N);
+	arena = (tree**) (data + sizeof(tree) * N);
 	for (int i = 0; i < N; i++) {
 		arena[i] = ptrs + i;
 	}
@@ -24,7 +24,7 @@ void tree::initialize(void* data, size_t bytes) {
 }
 
 __device__ tree* tree::alloc() {
-	int index = atomicAdd(&next_index,1);
+	int index = atomicAdd(&next_index, 1);
 	if (index < arena_size) {
 		return arena[index];
 	} else {
@@ -33,28 +33,32 @@ __device__ tree* tree::alloc() {
 	}
 }
 
-
-__device__ particle* sort_parts(particle* b, particle* e, pos_type xmid, int dim) {
+__device__ particle* sort_parts(int* lo, int* hi, particle* swap, particle* b, particle* e, pos_type xmid, int dim) {
+	const int& tid = threadIdx.x;
+	const int& block_size = blockDim.x;
 	if (e == b) {
 		return e;
 	} else {
-		particle* lo = b;
-		particle* hi = e;
-		while (lo < hi) {
-			if (lo->x[dim] > xmid) {
-				while (lo != hi) {
-					hi--;
-					if (hi->x[dim] < xmid) {
-						particle tmp = *lo;
-						*lo = *hi;
-						*hi = tmp;
-						break;
-					}
-				}
-			}
-			lo++;
+		if (tid == 0) {
+			*lo = 0;
+			*hi = (e - b) - 1;
 		}
-		return hi;
+		__syncthreads();
+		int index;
+		for (particle* part = b + tid; part < e; part += block_size) {
+			if (part->x[dim] > xmid) {
+				index = atomicSub(hi, 1);
+			} else {
+				index = atomicAdd(lo, 1);
+			}
+			swap[index] = *part;
+		}
+		__syncthreads();
+		for (index = tid; index < (e - b); index += block_size) {
+			b[index] = swap[index];
+		}
+		__syncthreads();
+		return b + *lo;
 	}
 }
 
@@ -66,33 +70,26 @@ struct tree_sort_type {
 };
 
 __global__
-void root_tree_sort(tree* root, particle* pbegin, particle* pend, const range<pos_type> box) {
+void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range<pos_type> box) {
 	__shared__ sort_workspace spaces[MAXDEPTH];
-	root->sort(spaces, pbegin, pend, box, 0);
+	root->sort(spaces, swap_space, pbegin, pend, box, 0);
 }
 
 __global__
-void tree_sort(tree_sort_type* trees, int depth) {
+void tree_sort(tree_sort_type* trees, particle* swap_space, int depth) {
 	__shared__ sort_workspace spaces[MAXDEPTH];
 	const int& bid = blockIdx.x;
+	particle* base = trees->begins[0];
 	particle* b = trees->begins[bid];
 	particle* e = trees->ends[bid];
+	particle* this_swap = swap_space + (b - base);
 	range<pos_type> box = trees->boxes[bid];
-	if( threadIdx.x == 0 ) {
-		for( auto* p = b; p < e; p++) {
-			if( !box.in_range(p->x)) {
-				printf( "error\n");
-				__trap();
-			}
-		}
-	}
-	__syncthreads();
-	trees->tree_ptrs[bid]->sort(spaces, b, e, box, depth);
+	trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth);
 	__syncthreads();
 }
 
-__device__ void tree::sort(sort_workspace* workspace, particle* pbegin, particle* pend, range<pos_type> box_,
-		int depth_) {
+__device__ void tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
+		range<pos_type> box_, int depth_) {
 	const int& tid = threadIdx.x;
 	if (tid == 0) {
 		part_begin = pbegin;
@@ -104,8 +101,8 @@ __device__ void tree::sort(sort_workspace* workspace, particle* pbegin, particle
 	pos_type midx;
 	particle* mid;
 	__syncthreads();
-/*	if (tid == 0) {
-		for (auto* ptr = part_begin; ptr < part_end; ptr++) {
+	if (tid == 0) {
+/*		for (auto* ptr = part_begin; ptr < part_end; ptr++) {
 			if (!box.in_range(ptr->x)) {
 				printf("Particle out of range at depth %i\n", depth);
 				for (int dim = 0; dim < NDIM; dim++) {
@@ -114,39 +111,43 @@ __device__ void tree::sort(sort_workspace* workspace, particle* pbegin, particle
 				printf("\n");
 				__trap();
 			}
-		}
-	}*/
-	if( tid == 0 ) {
-		printf( "Sorting at depth %i\n", depth);
+		}*/
+		printf("Sorting at depth %i\n", depth);
 	}
+
 	__syncthreads();
 	if (pend - pbegin > opts.parts_per_bucket) {
+		midx = (box.begin[2] / pos_type(2) + box.end[2] / pos_type(2));
+		mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, pbegin, pend, midx, 2);
 		if (tid == 0) {
-			midx = (box.begin[2] / pos_type(2) + box.end[2] / pos_type(2));
-			mid = sort_parts(pbegin, pend, midx, 2);
 			workspace->begin[0] = pbegin;
-			workspace->end[0] = workspace->begin[1] = mid;
-			workspace->end[1] = pend;
+			workspace->end[0] = workspace->begin[4] = mid;
+			workspace->end[4] = pend;
 		}
 		__syncthreads();
-		if (tid < 2) {
-			particle* b = workspace->begin[tid];
-			particle* e = workspace->end[tid];
+		for (int i = 0; i < 2; i++) {
+			particle* b = workspace->begin[4 * i];
+			particle* e = workspace->end[4 * i];
 			midx = (box.begin[1] / pos_type(2) + box.end[1] / pos_type(2));
-			mid = sort_parts(b, e, midx, 1);
-			workspace->begin[2 * tid] = b;
-			workspace->end[2 * tid] = workspace->begin[2 * tid + 1] = mid;
-			workspace->end[2 * tid + 1] = e;
+			mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, b, e, midx, 1);
+			if (tid == 0) {
+				workspace->begin[4 * i] = b;
+				workspace->end[4 * i] = workspace->begin[4 * i + 2] = mid;
+				workspace->end[4 * i + 2] = e;
+			}
+			__syncthreads();
 		}
-		__syncthreads();
-		if (tid < 4) {
-			particle* b = workspace->begin[tid];
-			particle* e = workspace->end[tid];
+		for (int i = 0; i < 4; i++) {
+			particle* b = workspace->begin[2 * i];
+			particle* e = workspace->end[2 * i];
 			midx = (box.begin[0] / pos_type(2) + box.end[0] / pos_type(2));
-			mid = sort_parts(b, e, midx, 0);
-			workspace->begin[2 * tid] = b;
-			workspace->end[2 * tid] = workspace->begin[2 * tid + 1] = mid;
-			workspace->end[2 * tid + 1] = e;
+			mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, b, e, midx, 0);
+			if (tid == 0) {
+				workspace->begin[2 * i] = b;
+				workspace->end[2 * i] = workspace->begin[2 * i + 1] = mid;
+				workspace->end[2 * i + 1] = e;
+			}
+			__syncthreads();
 		}
 		__syncthreads();
 		if (tid == 0) {
@@ -162,8 +163,9 @@ __device__ void tree::sort(sort_workspace* workspace, particle* pbegin, particle
 		box.split(workspace->cranges);
 		if (depth > opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {
-				children[ci]->sort(workspace + 1, workspace->begin[ci], workspace->end[ci], workspace->cranges[ci],
-						depth + 1);
+				particle* swap_base = swap_space + (workspace->begin[ci] - workspace->begin[0]);
+				children[ci]->sort(workspace + 1, swap_base, workspace->begin[ci], workspace->end[ci],
+						workspace->cranges[ci], depth + 1);
 			}
 		} else {
 			__shared__ tree_sort_type* childdata;
@@ -179,8 +181,7 @@ __device__ void tree::sort(sort_workspace* workspace, particle* pbegin, particle
 			}
 			__syncthreads();
 			if (tid == 0) {
-//				printf("Invoking kernel at depth %i\n", depth);
-				tree_sort<<<NCHILD,NCHILD>>>(childdata, depth+1);
+				tree_sort<<<NCHILD,NCHILD>>>(childdata, swap_space, depth+1);
 				CUDA_CHECK(cudaGetLastError());
 			}
 			__syncthreads();
