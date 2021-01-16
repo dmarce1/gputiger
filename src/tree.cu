@@ -186,7 +186,13 @@ __device__ void tree::sort(sort_workspace* workspace, particle* swap_space, part
 			}
 			__syncthreads();
 			if (tid == 0) {
-				tree_sort<<<NCHILD,NCHILD>>>(childdata, swap_space, depth+1);
+				int threadcnt;
+				if( depth == opts.max_kernel_depth) {
+					threadcnt = opts.parts_per_bucket;
+				} else {
+					threadcnt = min((int)((part_end - part_begin) / NCHILD), (int)MAXTHREADCOUNT);
+				}
+				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1);
 				CUDA_CHECK(cudaGetLastError());
 			}
 			__syncthreads();

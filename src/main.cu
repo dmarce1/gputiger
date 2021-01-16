@@ -61,7 +61,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 		vel_k = new interp_functor<float>;
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
-		integrate<sigma8_integrand, float> <<<1, 1024>>>(func_ptr,
+		integrate<sigma8_integrand, float> <<<1, MAXTHREADCOUNT>>>(func_ptr,
 				(float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
 		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());

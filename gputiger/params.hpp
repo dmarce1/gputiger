@@ -15,6 +15,8 @@
 #define NDIM 3
 #define NCHILD (1<<NDIM)
 #define MAXDEPTH 20
+#define MAXTHREADCOUNT 1024
+#define WARPSIZE 32
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
 
