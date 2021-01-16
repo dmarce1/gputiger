@@ -8,4 +8,5 @@
 struct monopole {
 	unsigned mass;
 	array<pos_type,NDIM> xcom;
+	pos_type radius;
 };

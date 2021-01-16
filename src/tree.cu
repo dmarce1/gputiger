@@ -1,13 +1,22 @@
 #include <gputiger/tree.hpp>
 
 __device__
-              static tree** arena;
+                 static tree** arena;
 
 __device__
 static int next_index;
 
 __device__
 static int arena_size;
+
+__device__
+static int* active_list;
+
+__device__
+static int active_count;
+
+__device__
+ static particle* part_begin;
 
 struct tree_sort_type {
 	array<tree*, NCHILD> tree_ptrs;
@@ -18,16 +27,19 @@ struct tree_sort_type {
 };
 
 __device__
-void tree::initialize(void* data, size_t bytes) {
+void tree::initialize(particle* parts, void* data, size_t bytes) {
 	int sztot = sizeof(tree) + sizeof(tree*);
-	int N = bytes / sztot;
+	int N = (bytes - opts.nparts * sizeof(int)) / sztot;
 	next_index = 0;
 	arena_size = N;
 	tree* ptrs = (tree*) data;
 	arena = (tree**) (data + sizeof(tree) * N);
+	active_list = (int*) (data + (sizeof(tree) + sizeof(tree*)) * N);
+	active_count = 0;
 	for (int i = 0; i < N; i++) {
 		arena[i] = ptrs + i;
 	}
+	::part_begin = parts;
 	printf("Done allocating trees\n");
 }
 
@@ -71,13 +83,14 @@ __device__ particle* sort_parts(int* lo, int* hi, particle* swap, particle* b, p
 }
 
 __global__
-void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range<pos_type> box) {
+void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range<pos_type> box,
+		int rung) {
 	__shared__ sort_workspace spaces[MAXDEPTH];
-	root->sort(spaces, swap_space, pbegin, pend, box, 0);
+	root->sort(spaces, swap_space, pbegin, pend, box, 0, rung);
 }
 
 __global__
-void tree_sort(tree_sort_type* trees, particle* swap_space, int depth) {
+void tree_sort(tree_sort_type* trees, particle* swap_space, int depth, int rung) {
 	__shared__ sort_workspace spaces[MAXDEPTH];
 	const int& bid = blockIdx.x;
 	particle* base = trees->begins[0];
@@ -85,12 +98,12 @@ void tree_sort(tree_sort_type* trees, particle* swap_space, int depth) {
 	particle* e = trees->ends[bid];
 	particle* this_swap = swap_space + (b - base);
 	range<pos_type> box = trees->boxes[bid];
-	trees->poles[bid] = trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth);
+	trees->poles[bid] = trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth, rung);
 	__syncthreads();
 }
 
 __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
-		range<pos_type> box_, int depth_) {
+		range<pos_type> box_, int depth_, int rung) {
 	const int& tid = threadIdx.x;
 	const int& block_size = blockDim.x;
 	if (tid == 0) {
@@ -165,7 +178,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			for (int ci = 0; ci < NCHILD; ci++) {
 				particle* swap_base = swap_space + (workspace->begin[ci] - workspace->begin[0]);
 				monopole this_pole = children[ci]->sort(workspace + 1, swap_base, workspace->begin[ci],
-						workspace->end[ci], workspace->cranges[ci], depth + 1);
+						workspace->end[ci], workspace->cranges[ci], depth + 1, rung);
 				if (tid == 0) {
 					count += this_pole.mass;
 				}
@@ -196,7 +209,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				} else {
 					threadcnt = min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT);
 				}
-				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1);
+				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1, rung);
 				CUDA_CHECK(cudaGetLastError());
 			}
 			__syncthreads();
@@ -248,6 +261,10 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				for (int dim = 0; dim < NDIM; dim++) {
 					poles[dim] += p->x[dim];
 				}
+				if (p->rung >= rung) {
+					int index = atomicAdd(&active_count, 1);
+					active_list[index] = (p - part_begin);
+				}
 			}
 			for (int P = block_size / 2; P >= 1; P /= 2) {
 				if (tid < P) {
@@ -268,10 +285,9 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 		}
 		__syncthreads();
 	}
+	if (tid == 0) {
+		pole.radius = (box.end[0] - box.begin[0]) / 2;
+	}
 	__syncthreads();
 	return pole;
-}
-
-__device__ void tree::destroy() {
-
 }

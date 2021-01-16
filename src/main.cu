@@ -61,7 +61,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 		vel_k = new interp_functor<float>;
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
-		integrate<sigma8_integrand, float> <<<1, MAXTHREADCOUNT>>>(func_ptr,
+		integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
 				(float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
 		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());
@@ -194,7 +194,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Begining non-linear evolution\n");
-		tree::initialize(arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * 2);
+		tree::initialize(parts, arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * 2);
 		CUDA_CHECK(cudaMalloc(&root, sizeof(tree)));
 	}
 	__syncthreads();
@@ -206,7 +206,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Sorting\n");
-		root_tree_sort<<<1,1024>>>(root, host_parts, parts, parts+N3, root_range);
+		root_tree_sort<<<1,1024>>>(root, host_parts, parts, parts+N3, root_range, 0);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
@@ -261,6 +261,7 @@ int main() {
 	params.nout = 64;
 	params.max_kernel_depth = 3;
 	params.parts_per_bucket = 64;
+	params.nparts = params.Ngrid*params.Ngrid*params.Ngrid;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);

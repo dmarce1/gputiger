@@ -33,17 +33,15 @@ class tree {
 	bool leaf;
 public:
 	__device__
-	static void initialize(void* arena, size_t bytes);
+	static void initialize(particle* parts, void* arena, size_t bytes);
 	__device__
 	  static tree* alloc();
 	__device__
-	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range<pos_type>,  int depth);
-	__device__
-	void destroy();
+	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range<pos_type>,  int depth, int rung);
 };
 
 
 __global__
-void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range<pos_type> box);
+void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range<pos_type> box, int rung);
 
 #endif /* TREE_HPP_ */

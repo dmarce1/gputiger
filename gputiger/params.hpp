@@ -35,6 +35,7 @@ struct options {
 	float clock_rate;
 	int nout;
 	int Ngrid;
+	int nparts;
 	float box_size;
 	float parts_per_bucket;
 	int max_kernel_depth;
