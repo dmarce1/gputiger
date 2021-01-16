@@ -2,20 +2,20 @@
 
 __device__
 void zero_order_universe::compute_matter_fractions(float& Oc, float& Ob, float a) const {
-	float omega_m = params.omega_b + params.omega_c;
-	float omega_r = params.omega_gam + params.omega_nu;
+	float omega_m = opts.omega_b + opts.omega_c;
+	float omega_r = opts.omega_gam + opts.omega_nu;
 	float Om = omega_m / (omega_r / a + omega_m + (a * a * a) * ((float) 1.0 - omega_m - omega_r));
-	Ob = params.omega_b * Om / omega_m;
-	Oc = params.omega_c * Om / omega_m;
+	Ob = opts.omega_b * Om / omega_m;
+	Oc = opts.omega_c * Om / omega_m;
 }
 
 __device__
 void zero_order_universe::compute_radiation_fractions(float& Ogam, float& Onu, float a) const {
-	float omega_m = params.omega_b + params.omega_c;
-	float omega_r = params.omega_gam + params.omega_nu;
+	float omega_m = opts.omega_b + opts.omega_c;
+	float omega_r = opts.omega_gam + opts.omega_nu;
 	float Or = omega_r / (omega_r + a * omega_m + (a * a * a * a) * ((float) 1.0 - omega_m - omega_r));
-	Ogam = params.omega_gam * Or / omega_r;
-	Onu = params.omega_nu * Or / omega_r;
+	Ogam = opts.omega_gam * Or / omega_r;
+	Onu = opts.omega_nu * Or / omega_r;
 }
 
 __device__
@@ -93,7 +93,7 @@ float zero_order_universe::redshift_to_time(float z) const {
 }
 
 __device__
-void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_parameters &opts, double amax) {
+void create_zero_order_universe(zero_order_universe* uni_ptr, double amax) {
 	zero_order_universe& uni = *uni_ptr;
 	;
 	printf("Creating zero order Universe\n");
@@ -225,7 +225,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 		Trad = T_radiation(a);
 		double dt = dloga / hubble;
 		const double gamma = 1.0 - 1.0 / sqrt(2.0);
-		chemistry_update(opts, cgs_hubble, nH, nHp, nHe, nHep, nHepp, ne, Tgas, a, 0.5 * dt);
+		chemistry_update(cgs_hubble, nH, nHp, nHe, nHep, nHepp, ne, Tgas, a, 0.5 * dt);
 		mu = (nH + nHp + 4 * nHe + 4 * nHep + 4 * nHepp) * mh / (nH + nHp + nHe + nHep + nHepp + ne);
 		sigmaC = mu / me * c * (8.0 / 3.0) * omega_gam / (a * omega_m) * sigma_T * ne / hubble;
 		const double dTgasdT1 = ((Tgas + gamma * dloga * sigmaC * Trad) / (1 + gamma * dloga * (2 + sigmaC)) - Tgas)
@@ -234,7 +234,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 		const double dTgasdT2 = ((T1 + gamma * dloga * sigmaC * Trad) / (1 + gamma * dloga * (2 + sigmaC)) - T1)
 				/ (gamma * dloga);
 		Tgas += 0.5 * (dTgasdT1 + dTgasdT2) * dloga;
-		chemistry_update(opts, cgs_hubble, nH, nHp, nHe, nHep, nHepp, ne, Tgas, a, 0.5 * dt);
+		chemistry_update( cgs_hubble, nH, nHp, nHe, nHep, nHepp, ne, Tgas, a, 0.5 * dt);
 		n = nH + nHp + nHe + nHep + nHepp;
 		P = kb * (n + ne) * Tgas;
 		sigmaT = c * sigma_T * ne / hubble;
@@ -328,6 +328,5 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_param
 	build_interpolation_function(&uni.sigma_T, thomson, (float) amin, (float) amax);
 	build_interpolation_function(&uni.cs2, sound_speed2, (float) amin, (float) amax);
 	uni.hubble = std::move(cosmic_hubble);
-	uni.params = opts;
 }
 

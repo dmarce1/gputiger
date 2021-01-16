@@ -15,10 +15,12 @@
 using pos_type = int32_t;
 
 __device__ inline float pos_to_float(pos_type pos) {
-	return (float) pos / ((float) (1LL << 32LL));
+	return ((float) pos / ((float) (1LL << 32LL)) + 0.5f) * opts.box_size;
 }
 
 __device__ inline  pos_type float_to_pos(float flt) {
+	flt -= 0.5f;
+	flt /= opts.box_size;
 	while (flt > 0.5) {
 		flt -= 1.0;
 	}

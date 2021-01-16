@@ -8,14 +8,14 @@
 #ifndef TREE_HPP_
 #define TREE_HPP_
 
-#include <gputiger/stack.hpp>
-#include <gputiger/mutex.hpp>
 #include <gputiger/particle.hpp>
 #include <gputiger/range.hpp>
 
-struct tree_params {
-	int parts_per_bucket;
-	int kernel_depth;
+
+struct sort_workspace {
+	particle* begin[NCHILD];
+	particle* end[NCHILD];
+	array<range<pos_type>, NCHILD> cranges;
 };
 
 class tree {
@@ -29,15 +29,17 @@ class tree {
 	bool leaf;
 public:
 	__device__
-	static void initialize(tree_params params, tree* arena, size_t bytes);
+	static void initialize(void* arena, size_t bytes);
 	__device__
 	  static tree* alloc();
 	__device__
-	static void free(tree*);
-	__device__
-	void sort(particle* pbegin, particle* pend, const range<pos_type>&,  int depth);
+	void sort(sort_workspace*, particle* pbegin, particle* pend, range<pos_type>,  int depth);
 	__device__
 	void destroy();
 };
+
+
+__global__
+void root_tree_sort(tree* root, particle* pbegin, particle* pend, const range<pos_type> box);
 
 #endif /* TREE_HPP_ */

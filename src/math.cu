@@ -52,6 +52,7 @@ void generate_random_normals(cmplx* nums, int N) {
 		float y1 = ((float) int2 + 0.5f) / (float) uint64_t(mod + uint64_t(1));
 		float x = x1;
 		float y = 2.f * (float) M_PI * y1;
+//		printf( "%i %i\n", i, N);
 		nums[i] = SQRT(-LOG(abs(x))) * expc(cmplx(0, 1) * y);
 	}
 	__syncthreads();

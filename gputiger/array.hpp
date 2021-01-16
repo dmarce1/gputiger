@@ -8,6 +8,7 @@
 #ifndef ARRAY_HPP_
 #define ARRAY_HPP_
 
+#include <cassert>
 
 template<class T, int N>
 class array {

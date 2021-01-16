@@ -13,14 +13,14 @@
 
 template<class T>
 class vector {
-	static constexpr size_t block_size = 1024;
+	static constexpr size_t block_size = 1024 / sizeof(T);
 	T *A;
 	size_t sz;
 	size_t capacity;
 public:
 	__device__
 	void resize(size_t new_size) {
-		if (new_size > capacity || new_size <= capacity / 2) {
+		if (new_size > capacity) {
 			size_t new_cap = block_size;
 			while (new_cap < new_size) {
 				new_cap *= 2;
@@ -37,6 +37,11 @@ public:
 			capacity = new_cap;
 		}
 		sz = new_size;
+	}
+	__device__ vector( T* ptr, size_t sz_) {
+		A = ptr;
+		sz = 0;
+		capacity = sz_;
 	}
 	__device__ vector() {
 		sz = 0;
@@ -104,11 +109,11 @@ public:
 		return A[sz - 1];
 	}
 	__device__
-	  const T& front() const {
+	   const T& front() const {
 		return A[0];
 	}
 	__device__
-	  const T& back() const {
+	   const T& back() const {
 		return A[sz - 1];
 	}
 	__device__

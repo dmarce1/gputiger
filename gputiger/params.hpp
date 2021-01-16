@@ -14,11 +14,12 @@
 
 #define NDIM 3
 #define NCHILD (1<<NDIM)
+#define MAXDEPTH 20
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
 
 
-struct cosmic_parameters {
+struct options {
 	float max_overden;
 	float h;
 	float Y;
@@ -32,8 +33,13 @@ struct cosmic_parameters {
 	int nout;
 	int Ngrid;
 	float box_size;
+	float parts_per_bucket;
+	int max_kernel_depth;
 };
 
+#ifndef PARAMSCU
+__device__ extern options opts;
+#endif
 
 
 #endif /* GPUTIGER_PARAMS_HPP_ */

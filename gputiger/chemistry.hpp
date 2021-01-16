@@ -15,9 +15,6 @@
 
 
 __device__
-void saha(const cosmic_parameters &opts, double rho, double T, double &H, double &Hp, double &He, double &Hep, double &Hepp, double &ne);
-
-__device__
-void chemistry_update(const cosmic_parameters &opts, const nvstd::function<double(double)> &Hubble, double &H, double &Hp, double &He, double &Hep, double &Hepp,
+void chemistry_update(const nvstd::function<double(double)> &Hubble, double &H, double &Hp, double &He, double &Hep, double &Hepp,
 		double &ne, double T, double a, double dt);
 #endif /* GPUTIGER_CHEMISTRY_HPP_ */

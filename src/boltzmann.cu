@@ -7,8 +7,8 @@ __device__ float sigma8_integrand::operator()(float x) const {
 	cos_state U;
 	einstein_boltzmann_init(&U, uni, k, 1.f, uni->amin);
 	einstein_boltzmann(&U, uni, k, uni->amin, 1.f);
-	float oc = uni->params.omega_c;
-	float ob = uni->params.omega_b;
+	float oc = opts.omega_c;
+	float ob = opts.omega_b;
 	float P = POW((oc*U[deltaci] + ob*U[deltabi])/(oc+ob), 2);
 	return c0 * P * POW((SIN(k*R) - k * R *COS(k*R)), 2) * pow(k, -3);
 }
@@ -55,8 +55,8 @@ void einstein_boltzmann(cos_state* uptr, const zero_order_universe *uni_ptr, flo
 	const nvstd::function<float(float)>& Hubble = uni.hubble;
 	float loga = LOG(amin);
 	float logamax = LOG(amax);
-	float omega_m = uni.params.omega_b + uni.params.omega_c;
-	float omega_r = uni.params.omega_gam + uni.params.omega_nu;
+	float omega_m = opts.omega_b + opts.omega_c;
+	float omega_r = opts.omega_gam + opts.omega_nu;
 	while (loga < logamax) {
 		float Oc, Ob, Ogam, Onu, Or;
 		float a = EXP(loga);
@@ -226,8 +226,8 @@ __device__ void einstein_boltzmann_interpolation_function(interp_functor<float>*
 	__syncthreads();
 	auto& den_k = *dptr;
 	auto& vel_k = *vptr;
-	float oc = uni->params.omega_c;
-	float ob = uni->params.omega_b;
+	float oc = opts.omega_c;
+	float ob = opts.omega_b;
 	float om = oc + ob;
 	oc /= om;
 	ob /= om;

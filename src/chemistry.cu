@@ -1,7 +1,7 @@
 #include <gputiger/chemistry.hpp>
 
 __device__
- void saha(const cosmic_parameters &opts, double rho, double T, double &H, double &Hp, double &He, double &Hep, double &Hepp, double &ne) {
+ void saha(double rho, double T, double &H, double &Hp, double &He, double &Hep, double &Hepp, double &ne) {
 	using namespace constants;
 	constexpr double eps_1_H = 13.59844 * evtoerg;
 	constexpr double eps_1_He = 24.58738 * evtoerg;
@@ -46,7 +46,7 @@ __device__
 }
 
 __device__
- void chemistry_update(const cosmic_parameters &opts, const nvstd::function<double(double)> &Hubble, double &H, double &Hp, double &He, double &Hep, double &Hepp,
+ void chemistry_update( const nvstd::function<double(double)> &Hubble, double &H, double &Hp, double &He, double &Hep, double &Hepp,
 		double &ne, double T, double a, double dt) {
 	using namespace constants;
 	bool use_saha;
@@ -63,7 +63,7 @@ __device__
 	double Hepp0 = Hepp;
 	double rho = ((H + Hp) + (He + Hep + Hepp) * 4) * mh;
 	if (ne > (H + Hp)) {
-		saha(opts, rho, T, H1, Hp1, He1, Hep1, Hepp1, ne1);
+		saha(rho, T, H1, Hp1, He1, Hep1, Hepp1, ne1);
 		if (ne1 > (H1 + Hp1)) {
 			use_saha = true;
 		} else {

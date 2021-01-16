@@ -12,7 +12,6 @@
 #include <gputiger/interp.hpp>
 
 struct zero_order_universe {
-	cosmic_parameters params;
 	double amin;
 	double amax;
 	nvstd::function<float(float)> hubble;
@@ -31,5 +30,5 @@ struct zero_order_universe {
 };
 
 __device__
-void create_zero_order_universe(zero_order_universe* uni_ptr, const cosmic_parameters &opts, double amax);
+void create_zero_order_universe(zero_order_universe* uni_ptr, double amax);
 
