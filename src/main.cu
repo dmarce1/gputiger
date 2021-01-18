@@ -53,26 +53,29 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	int Nk = opts.Ngrid * SQRT(3) + 1;
 	if (thread == 0) {
 		printf("\nNormalizing Einstein Boltzman solutions to a present day sigma8 of %e\n", opts.sigma8);
-		result_ptr = new float;
-		func_ptr = new sigma8_integrand;
+		/*		result_ptr = new float;
+		 func_ptr = new sigma8_integrand;
+		 */
 		CUDA_CHECK(cudaMalloc(&states, sizeof(cos_state) * Nk));
 		CUDA_CHECK(cudaMalloc(&basis, sizeof(cmplx) * opts.Ngrid / 2));
 		den_k = new interp_functor<float>;
 		vel_k = new interp_functor<float>;
-		func_ptr->uni = zeroverse_ptr;
-		func_ptr->littleh = opts.h;
-		integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
-				(float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
-		CUDA_CHECK(cudaGetLastError());
-		CUDA_CHECK(cudaDeviceSynchronize());
-		*result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
-		printf("The normalization value is %e\n", *result_ptr);
+		/*		func_ptr->uni = zeroverse_ptr;
+		 func_ptr->littleh = opts.h;
+		 integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
+		 (float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
+		 CUDA_CHECK(cudaGetLastError());
+		 CUDA_CHECK(cudaDeviceSynchronize());
+		 *result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
+		 printf("The normalization value is %e\n", *result_ptr);*/
 	}
+
 	__syncthreads();
 	if (thread == 0) {
 		printf("Computing start time for non-linear evolution\n");
 	}
-	float normalization = *result_ptr;
+//	float normalization = *result_ptr;
+	float normalization = 6.221450e-09;
 	if (thread == 0) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
@@ -151,7 +154,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 			for (int k = 0; k < N; k++) {
 				const int l = N * (N * i + j) + k;
 				float v = phi[l].real();
-				host_parts[l].v[0] = v;
+				host_parts[l].v[0] = v * a / opts.box_size;
 			}
 		}
 		__syncthreads();
@@ -166,10 +169,16 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 			for (int k = 0; k < N; k++) {
 				const int l = N * (N * i + j) + k;
 				const int I[NDIM] = { i, j, k };
-				float x = opts.box_size * (((float) I[dim] + 0.5f) / (float) N - 0.5f);
+				float x = (((float) I[dim] + 0.5f) / (float) N);
 				x += phi[l].real();
+				while (x > 1.0) {
+					x -= 1.0;
+				}
+				while (x < 0.0) {
+					x += 1.0;
+				}
 				float test1 = host_parts[l].v[0] / phi[l].real();
-				host_parts[l].x[dim] = float_to_pos(x);
+				host_parts[l].x[dim] = x;
 			}
 		}
 		__syncthreads();
@@ -194,19 +203,29 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Begining non-linear evolution\n");
-		tree::initialize(parts, arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * 2);
+		tree::initialize(parts, arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * TREESPACE);
 		CUDA_CHECK(cudaMalloc(&root, sizeof(tree)));
 	}
 	__syncthreads();
-	__shared__ range<pos_type> root_range;
+	__shared__ range root_range;
 	if (thread < 3) {
-		root_range.begin[thread] = 0x80000000;
-		root_range.end[thread] = 0x7FFFFFFF;
+		root_range.begin[thread] = float(0.0);
+		root_range.end[thread] = float(1.0);
 	}
 	__syncthreads();
 	if (thread == 0) {
 		printf("Sorting\n");
-		root_tree_sort<<<1,1024>>>(root, host_parts, parts, parts+N3, root_range, 0);
+		root_tree_sort<<<1,MAXTHREADCOUNT>>>(root, host_parts, parts, parts+N3, root_range, 0);
+		CUDA_CHECK(cudaGetLastError());
+	}
+	__syncthreads();
+	if (thread == 0) {
+		CUDA_CHECK(cudaDeviceSynchronize());
+	}
+	__syncthreads();
+	if (thread == 0) {
+		printf("Kicking\n");
+		root->kick(root, 0, 0.1);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
@@ -245,8 +264,8 @@ int main() {
 
 	struct cudaDeviceProp prop;
 	CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
-	params.clock_rate = prop.clockRate * pow(1024/1000,3) * 1000;
-	printf( "Clock rate = %e\n", params.clock_rate);
+	params.clock_rate = prop.clockRate * pow(1024 / 1000, 3) * 1000;
+	printf("Clock rate = %e\n", params.clock_rate);
 	params.h = 0.697;
 	params.Neff = 3.84;
 	params.Y = 0.24;
@@ -262,7 +281,7 @@ int main() {
 	params.max_kernel_depth = 3;
 	params.parts_per_bucket = 64;
 	params.opening_crit = 0.7;
-	params.nparts = params.Ngrid*params.Ngrid*params.Ngrid;
+	params.nparts = params.Ngrid * params.Ngrid * params.Ngrid;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);
@@ -272,7 +291,7 @@ int main() {
 	const int N = params.Ngrid;
 	const int N3 = N * N * N;
 	CUDA_CHECK(cudaMallocManaged(&parts_ptr, sizeof(particle) * N3));
-	size_t arena_size = 10 * sizeof(float) * N3;
+	size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
 	printf("Allocating arena of %li Mbytes\n", (arena_size / 1024 / 1024));
 	CUDA_CHECK(cudaMalloc(&arena, arena_size));
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, params);

@@ -112,7 +112,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, double amax) {
 	double amin = Theta * Tcmb / (0.07 * 1e6 * evtoK);
 	double logamin = log(amin);
 	double logamax = log(amax);
-	int N = 2 * 1024;
+	int N = 512;
 	double dloga = (logamax - logamin) / N;
 	vector<float> thomson(N + 1);
 	vector<float> sound_speed2(N + 1);
@@ -259,6 +259,7 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, double amax) {
 		}
 		if (Hionratio < 1 && !Hdeionized) {
 			Hdeionized = true;
+			assert(Hdeionized);
 			print_time(t);
 			printf(", redshift %.1f: Electrons combine with Hydrogen at a temperature of %8.2e K.\n", 1 / a - 1, Trad);
 		}

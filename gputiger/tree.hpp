@@ -12,20 +12,30 @@
 #include <gputiger/range.hpp>
 #include <gputiger/monopole.hpp>
 
+struct tree;
+
+struct tree_sort_type {
+	array<tree*, NCHILD> tree_ptrs;
+	array<range, NCHILD> boxes;
+	array<particle*, NCHILD> begins;
+	array<particle*, NCHILD> ends;
+	array<monopole, NCHILD> poles;
+};
 
 struct sort_workspace {
 	particle* begin[NCHILD];
 	particle* end[NCHILD];
-	array<range<pos_type>, NCHILD> cranges;
+	array<range, NCHILD> cranges;
 	int hi;
 	int lo;
-	array<int64_t, NDIM> poles[WARPSIZE];
-	int count[WARPSIZE];
+	array<float, NDIM> poles[WARPSIZE];
+	tree_sort_type* tree_sort;
+	float count[WARPSIZE];
 };
 
 struct tree {
 	array<tree*, NCHILD> children;
-	range<pos_type> box;
+	range box;
 	monopole pole;
 	particle* part_begin;
 	particle* part_end;
@@ -37,16 +47,14 @@ struct tree {
 	__device__
 	  static tree* alloc();
 	__device__
-	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range<pos_type>,  int depth, int rung);
+	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range,  int depth, int rung);
 	__device__
 	void kick(tree* root, int rung, float dt);
-	__global__
-	friend void tree_kick(tree* root, int rung, float dt);
 
 };
 
 
 __global__
-void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range<pos_type> box, int rung);
+void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range box, int rung);
 
 #endif /* TREE_HPP_ */
