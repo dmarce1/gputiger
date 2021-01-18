@@ -14,7 +14,7 @@
 
 __device__ inline float ewald_distance(float x) {
 	x = abs(x);
-	x = min(x, float(1) - x);
+	x = min(x, 1.f - x);
 	return x;
 }
 struct particle {

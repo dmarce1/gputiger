@@ -251,9 +251,9 @@ int main() {
 	options params;
 
 	size_t stack_size;
-	size_t desired_stack_size = 8 * 1024;
-	size_t rlimit = 10;
-	size_t heapsize = 256 * 1024 * 1024;
+	size_t desired_stack_size = 4 * 1024;
+	size_t rlimit = 12;
+	size_t heapsize = 8 * 1024 * 1024;
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, rlimit));
 	CUDA_CHECK(cudaDeviceGetLimit(&rlimit, cudaLimitDevRuntimeSyncDepth));
 	printf("CUDA recursion limit = %li\n", rlimit);
@@ -282,9 +282,9 @@ int main() {
 	params.box_size = 1000;
 	//	params.box_size = 613.0 / 2160.0 * params.Ngrid;
 	params.nout = 64;
-	params.max_kernel_depth = 3;
-	params.parts_per_bucket = 64;
-	params.opening_crit = 0.7;
+	params.max_kernel_depth = 10;
+	params.parts_per_bucket = 100;
+	params.opening_crit = 0.5;
 	params.nparts = params.Ngrid * params.Ngrid * params.Ngrid;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
