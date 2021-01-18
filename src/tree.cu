@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                         static tree** arena;
+                                                                          static tree** arena;
 
 __device__
 static int next_index;
@@ -17,7 +17,7 @@ __device__
 static int active_count;
 
 __device__
-                                                         static particle* part_base;
+                                                          static particle* part_base;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes) {
@@ -283,7 +283,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 #define KICKWARPSIZE 32
 
 struct direct_t {
-	particle* p;
+	int pi;
 	const tree* t;
 };
 
@@ -294,7 +294,9 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	const int& yi = blockIdx.x;
 	const int& dy = gridDim.y;
 	const int& xi = blockIdx.y;
-	const int myindex = dz * (dy * xi + yi) + zi;
+	const int index0 = dz * (dy * xi + yi);
+	const int myindex = index0 + zi;
+	__shared__ float F[NDIM][KICKWARPSIZE];
 	__shared__ direct_t* directs;
 	__shared__ int next_direct_index;
 	if (zi == 0) {
@@ -303,6 +305,9 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	}
 	__shared__ int myflops[KICKWARPSIZE];
 	myflops[zi] = float(0.0);
+	for( int dim = 0; dim < NDIM; dim++) {
+		F[dim][zi] = float(0);
+	}
 	__syncthreads();
 	if (myindex < active_count) {
 		int depth;
@@ -318,7 +323,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		do {
 			const auto& other = *pointers[depth];
 			array<float, NDIM> other_x = other.pole.xcom;
-			const float w = (other.box.end[0] - other.box.begin[0])*SQRT(0.75);
+			const float w = (other.box.end[0] - other.box.begin[0]) * SQRT(0.75);
 			float dist2 = float(0);
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -339,11 +344,11 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			assert(!(!opened && depth == 0));
 			if (opened && other.leaf) {
 				direct_t dir;
-				dir.p = &part;
+				dir.pi = zi;
 				dir.t = &other;
 				int index = atomicAdd(&next_direct_index, 1);
-				if( index >= 16*1024) {
-					printf( "Internal buffer exceeded\n");
+				if (index >= 16 * 1024) {
+					printf("Internal buffer exceeded\n");
 					__trap();
 				}
 				directs[index] = dir;
@@ -379,7 +384,8 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	int kindex = 0;
 	while (jindex != stop) {
 		const auto& t = *directs[jindex].t;
-		const auto& sink = *directs[jindex].p;
+		const auto index1 = directs[jindex].pi;
+		const particle& sink = *(part_base + active_list[index0 + index1]);
 		if (kindex >= t.part_end - t.part_begin) {
 			jindex++;
 			kindex = 0;
@@ -387,7 +393,6 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		if (jindex != stop) {
 			const auto& source = t.part_begin[kindex];
 			float X[NDIM];
-			float F[NDIM];
 			float dist2 = float(0);
 			for (int dim = 0; dim < NDIM; dim++) {
 				float x = sink.x[dim] - source.x[dim];
@@ -398,7 +403,8 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			float dinv3 = dinv * dinv * dinv;
 			myflops[zi] += 5;
 			for (int dim = 0; dim < NDIM; dim++) {
-				F[dim] += X[dim] * dinv3;
+				float f = X[dim] * dinv3;
+				atomicAdd(&F[dim][index1], f);
 			}
 			myflops[zi] += 28;
 			kindex++;
