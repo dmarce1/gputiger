@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                    static tree** arena;
+                                                                         static tree** arena;
 
 __device__
 static int next_index;
@@ -17,7 +17,7 @@ __device__
 static int active_count;
 
 __device__
-                                                    static particle* part_base;
+                                                         static particle* part_base;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes) {
@@ -282,15 +282,28 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 
 #define KICKWARPSIZE 32
 
+struct direct_t {
+	particle* p;
+	const tree* t;
+};
+
 __global__
-void tree_kick(tree* root, int rung, float dt) {
+void tree_kick(tree* root, int rung, float dt, double* flops) {
 	const int& zi = threadIdx.x;
 	const int& dz = blockDim.x;
 	const int& yi = blockIdx.x;
 	const int& dy = gridDim.y;
 	const int& xi = blockIdx.y;
 	const int myindex = dz * (dy * xi + yi) + zi;
-	int directs = 0;
+	__shared__ direct_t* directs;
+	__shared__ int next_direct_index;
+	if (zi == 0) {
+		CUDA_CHECK(cudaMalloc(&directs, 16 * 1024 * sizeof(direct_t)));
+		next_direct_index = 0;
+	}
+	__shared__ int myflops[KICKWARPSIZE];
+	myflops[zi] = float(0.0);
+	__syncthreads();
 	if (myindex < active_count) {
 		int depth;
 		particle& part = *(part_base + active_list[myindex]);
@@ -312,6 +325,7 @@ void tree_kick(tree* root, int rung, float dt) {
 				dist = ewald_distance(part.x[dim] - other_x[dim]);
 				dist2 += dist * dist;
 			}
+			myflops[zi] += 15;
 			//		printf("%e %e %e\n", other_x[0], other_x[1], other_x[2]);
 			assert(abs(other_x[0]) <= 1.0);
 			assert(abs(other_x[1]) <= 1.0);
@@ -321,9 +335,14 @@ void tree_kick(tree* root, int rung, float dt) {
 			assert(abs(other_x[2]) >= 0.0);
 			dist = SQRT(dist2);
 			bool opened = w > opts.opening_crit * dist;
+			myflops[zi] += 10;
 			assert(!(!opened && depth == 0));
-			if (opened && pointers[depth]->leaf) {
-				directs++;
+			if (opened && other.leaf) {
+				direct_t dir;
+				dir.p = &part;
+				dir.t = &other;
+				int index = atomicAdd(&next_direct_index, 1);
+				directs[index] = dir;
 			}
 			if (!opened || pointers[depth]->leaf) {
 				child_indexes[depth] = 0;
@@ -348,7 +367,50 @@ void tree_kick(tree* root, int rung, float dt) {
 
 	}
 	__syncthreads();
-//	printf( "%i\n", directs);
+	const int& size = next_direct_index;
+	int start = zi * size / KICKWARPSIZE;
+	int stop = min((zi + 1) * size / KICKWARPSIZE, size);
+
+	int jindex = start;
+	int kindex = 0;
+	while (jindex != stop) {
+		const auto& t = *directs[jindex].t;
+		const auto& sink = *directs[jindex].p;
+		if (kindex >= t.part_end - t.part_begin) {
+			jindex++;
+			kindex = 0;
+		}
+		if (jindex != stop) {
+			const auto& source = t.part_begin[kindex];
+			float X[NDIM];
+			float F[NDIM];
+			float dist2 = float(0);
+			for (int dim = 0; dim < NDIM; dim++) {
+				float x = sink.x[dim] - source.x[dim];
+				X[dim] = copysign(min(x, float(1) - x), x * (float(0.5) - x));
+				dist2 += X[dim] * X[dim];
+			}
+			float dinv = rsqrtf(dist2);
+			float dinv3 = dinv * dinv * dinv;
+			myflops[zi] += 5;
+			for (int dim = 0; dim < NDIM; dim++) {
+				F[dim] += X[dim] * dinv3;
+			}
+			myflops[zi] += 28;
+			kindex++;
+		}
+	}
+	__syncthreads();
+	for (int P = KICKWARPSIZE / 2; P >= 1; P /= 2) {
+		if (zi > P) {
+			myflops[zi] += myflops[zi + P];
+		}
+		__syncthreads();
+	}
+	atomicAdd(flops, (double) myflops[0]);
+	if (zi == 0) {
+		CUDA_CHECK(cudaFree(directs));
+	}
 }
 
 __device__
@@ -359,10 +421,14 @@ void tree::kick(tree* root, int rung, float dt) {
 	dim3 dim;
 	dim.x = dim.y = block_size;
 	dim.z = 1;
-	tree_kick<<<dim,KICKWARPSIZE>>>(root, rung,dt);
-
+	double* flops;
+	CUDA_CHECK(cudaMalloc(&flops, sizeof(double)));
+	*flops = 0.0;
+	tree_kick<<<dim,KICKWARPSIZE>>>(root, rung,dt, flops);
 	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaDeviceSynchronize());
+	printf("FLOPS = %e\n", *flops);
+	CUDA_CHECK(cudaFree(flops));
 
 }
 

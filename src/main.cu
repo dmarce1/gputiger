@@ -253,11 +253,15 @@ int main() {
 	size_t stack_size;
 	size_t desired_stack_size = 4 * 1024;
 	size_t rlimit = 10;
+	size_t heapsize = 256 * 1024 * 1024;
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, rlimit));
 	CUDA_CHECK(cudaDeviceGetLimit(&rlimit, cudaLimitDevRuntimeSyncDepth));
 	printf("CUDA recursion limit = %li\n", rlimit);
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitStackSize, desired_stack_size));
 	CUDA_CHECK(cudaDeviceGetLimit(&stack_size, cudaLimitStackSize));
+	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapsize));
+	CUDA_CHECK(cudaDeviceGetLimit(&heapsize, cudaLimitMallocHeapSize));
+	printf( "heapsize = %li\n", heapsize/1024/1024);
 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
 	particle* parts_ptr;
 	printf("Stack Size = %li\n", stack_size);
@@ -272,7 +276,7 @@ int main() {
 	params.omega_b = 0.0240 / (params.h * params.h);
 	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
-	params.Ngrid = 16;
+	params.Ngrid = 256;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
 	params.box_size = 1000;
