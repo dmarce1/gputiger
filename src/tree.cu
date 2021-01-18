@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                               static tree** arena;
+                                                                 static tree** arena;
 
 __device__
 static int next_index;
@@ -17,7 +17,7 @@ __device__
 static int active_count;
 
 __device__
-                                               static particle* part_base;
+                                                 static particle* part_base;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes) {
@@ -278,7 +278,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	return pole;
 }
 
-#define KICKWARPSIZE 128
+#define KICKWARPSIZE 32
 
 __global__
 void tree_kick(tree* root, int rung, float dt) {
@@ -299,10 +299,15 @@ void tree_kick(tree* root, int rung, float dt) {
 		pointers[0] = root;
 		depth = 0;
 		bool done = false;
+		bool onleaf = false;
+		particle* other_part = nullptr;
 		do {
+			bool opened;
+			array<float, NDIM> other_x;
+			float other_mass;
 			const auto& other = *pointers[depth];
-			array<float, NDIM> other_x = other.pole.xcom;
-			const float w = other.box.end[0] - other.box.begin[0];
+			other_x = onleaf ? other_part->x : other.pole.xcom;
+			other_mass = onleaf ? float(1) : other.pole.mass;
 			float dist2 = float(0);
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -310,25 +315,41 @@ void tree_kick(tree* root, int rung, float dt) {
 				dist2 += dist * dist;
 			}
 			dist = SQRT(dist2);
-			bool opened = w > opts.opening_crit * dist;
-			assert(!(!opened && depth == 0));
-			if (!opened || pointers[depth]->leaf) {
-				depth--;
-				while (child_indexes[depth] == NCHILD - 1 && depth) {
-					child_indexes[depth] = 0;
-					depth--;
+			if (!onleaf) {
+				const float w = other.box.end[0] - other.box.begin[0];
+				opened = w > opts.opening_crit * dist;
+				assert(!(!opened && depth == 0));
+			} else {
+				other_part++;
+				if (other_part == other.part_end) {
+					onleaf = false;
+					other_part = nullptr;
 				}
-				child_indexes[depth]++;
-				done = child_indexes[depth] == NCHILD;
+				opened = true;
 			}
-			if (!done) {
-				depth++;
-				assert(child_indexes[depth - 1] < NCHILD);
-				assert(child_indexes[depth - 1] >= 0);
-				assert(depth < MAXDEPTH);
-				assert(depth >= 0);
-				child_indexes[depth] = 0;
-				pointers[depth] = pointers[depth - 1]->children[child_indexes[depth - 1]];
+			if (!opened && other.leaf && (other.part_end - other.part_begin) > 0) {
+				onleaf = true;
+				other_part = other.part_begin;
+			}
+			if (!onleaf) {
+				if (!opened || (pointers[depth]->leaf && !onleaf)) {
+					depth--;
+					while (child_indexes[depth] == NCHILD - 1 && depth) {
+						child_indexes[depth] = 0;
+						depth--;
+					}
+					child_indexes[depth]++;
+					done = child_indexes[depth] == NCHILD;
+				}
+				if (!done) {
+					depth++;
+					assert(child_indexes[depth - 1] < NCHILD);
+					assert(child_indexes[depth - 1] >= 0);
+					assert(depth < MAXDEPTH);
+					assert(depth >= 0);
+					child_indexes[depth] = 0;
+					pointers[depth] = pointers[depth - 1]->children[child_indexes[depth - 1]];
+				}
 			}
 		} while (!done);
 
