@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                          static tree** arena;
+                                                                            static tree** arena;
 
 __device__
 static int next_index;
@@ -17,7 +17,7 @@ __device__
 static int active_count;
 
 __device__
-                                                          static particle* part_base;
+                                                            static particle* part_base;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes) {
@@ -100,6 +100,10 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	const int& tid = threadIdx.x;
 	const int& block_size = blockDim.x;
 	if (tid == 0) {
+		if( depth_ >= MAXDEPTH) {
+			printf( "Maximum depth exceeded in sort\n");
+			__trap();
+		}
 		part_begin = pbegin;
 		part_end = pend;
 		depth = depth_;
@@ -134,37 +138,25 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	__syncthreads();
 	if (pend - pbegin > opts.parts_per_bucket) {
 //		auto tm = clock();
-		midx = (box.begin[2] / float(2) + box.end[2] / float(2));
-		mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, pbegin, pend, midx, 2);
+		float max_span = 0.0;
+		int long_dim;
+		for (int dim = 0; dim < NDIM; dim++) {
+			if (box.end[dim] - box.begin[dim] > max_span) {
+				max_span = box.end[dim] - box.begin[dim];
+				long_dim = dim;
+			}
+		}
+		midx = (box.begin[long_dim] / float(2) + box.end[long_dim] / float(2));
+		mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, pbegin, pend, midx, long_dim);
 		if (tid == 0) {
+			workspace->cranges[0] = box;
+			workspace->cranges[1] = box;
+			workspace->cranges[0].end[long_dim] = midx;
+			workspace->cranges[1].begin[long_dim] = midx;
 			workspace->begin[0] = pbegin;
-			workspace->end[0] = workspace->begin[4] = mid;
-			workspace->end[4] = pend;
-		}
-		__syncthreads();
-		for (int i = 0; i < 2; i++) {
-			particle* b = workspace->begin[4 * i];
-			particle* e = workspace->end[4 * i];
-			midx = (box.begin[1] / float(2) + box.end[1] / float(2));
-			mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, b, e, midx, 1);
-			if (tid == 0) {
-				workspace->begin[4 * i] = b;
-				workspace->end[4 * i] = workspace->begin[4 * i + 2] = mid;
-				workspace->end[4 * i + 2] = e;
-			}
-			__syncthreads();
-		}
-		for (int i = 0; i < 4; i++) {
-			particle* b = workspace->begin[2 * i];
-			particle* e = workspace->end[2 * i];
-			midx = (box.begin[0] / float(2) + box.end[0] / float(2));
-			mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, b, e, midx, 0);
-			if (tid == 0) {
-				workspace->begin[2 * i] = b;
-				workspace->end[2 * i] = workspace->begin[2 * i + 1] = mid;
-				workspace->end[2 * i + 1] = e;
-			}
-			__syncthreads();
+			workspace->end[0] = workspace->begin[1] = mid;
+			workspace->end[1] = pend;
+
 		}
 		__syncthreads();
 		if (tid == 0) {
@@ -172,8 +164,6 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				children[ci] = alloc();
 			}
 		}
-		__syncthreads();
-		box.split(workspace->cranges);
 		__syncthreads();
 		if (depth > opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {
@@ -305,10 +295,11 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	}
 	__shared__ int myflops[KICKWARPSIZE];
 	myflops[zi] = float(0.0);
-	for( int dim = 0; dim < NDIM; dim++) {
+	for (int dim = 0; dim < NDIM; dim++) {
 		F[dim][zi] = float(0);
 	}
 	__syncthreads();
+	int ndirect = 0;
 	if (myindex < active_count) {
 		int depth;
 		particle& part = *(part_base + active_list[myindex]);
@@ -323,7 +314,11 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		do {
 			const auto& other = *pointers[depth];
 			array<float, NDIM> other_x = other.pole.xcom;
-			const float w = (other.box.end[0] - other.box.begin[0]) * SQRT(0.75);
+			float w = 0.0;
+			for (int dim = 0; dim < NDIM; dim++) {
+				w += POW(other.box.end[dim] - other.box.begin[dim], 2);
+			}
+			w = SQRT(w) / 2.0;
 			float dist2 = float(0);
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -352,6 +347,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 					__trap();
 				}
 				directs[index] = dir;
+				ndirect += other.part_end - other.part_begin;
 			}
 			if (!opened || pointers[depth]->leaf) {
 				child_indexes[depth] = 0;
@@ -411,6 +407,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		}
 	}
 	__syncthreads();
+//	printf("%i\n", ndirect);
 	for (int P = KICKWARPSIZE / 2; P >= 1; P /= 2) {
 		if (zi > P) {
 			myflops[zi] += myflops[zi + P];

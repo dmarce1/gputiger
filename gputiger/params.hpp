@@ -14,8 +14,8 @@
 
 #define TREESPACE 4
 #define NDIM 3
-#define NCHILD (1<<NDIM)
-#define MAXDEPTH 10
+#define NCHILD (2)
+#define MAXDEPTH 30
 #define MAXTHREADCOUNT 512
 #define WARPSIZE 32
 

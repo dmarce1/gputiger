@@ -251,7 +251,7 @@ int main() {
 	options params;
 
 	size_t stack_size;
-	size_t desired_stack_size = 4 * 1024;
+	size_t desired_stack_size = 8 * 1024;
 	size_t rlimit = 10;
 	size_t heapsize = 256 * 1024 * 1024;
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, rlimit));
