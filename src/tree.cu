@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                        static tree* tree_base;
+                                                                                                static tree* tree_base;
 
 __device__
 static int next_index;
@@ -266,7 +266,8 @@ struct direct_t {
 	const tree* other;
 };
 
-#define PARTMAX 100
+#define PARTMAX 128
+#define OTHERSMAX (256)
 
 __global__
 void tree_kick(tree* root, int rung, float dt, double* flops) {
@@ -274,14 +275,25 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
 	const int myindex = (gridDim.x * xi + yi);
-	//	__shared__ float F[NDIM][KICKWARPSIZE];
+	__shared__ float h2;
 	__shared__ int myflops[KICKWARPSIZE];
-	myflops[tid] = float(0.0);
-//	for (int dim = 0; dim < NDIM; dim++) {
-//		F[dim][zi] = float(0);
-//	}
+	myflops[tid] = 0.f;
 	__shared__ bool opened;
 	__shared__ array<float, NDIM> F[PARTMAX];
+	__shared__ array<float, NDIM> others1[OTHERSMAX];
+	__shared__ array<float, NDIM> others2[OTHERSMAX];
+	__shared__ array<float, NDIM> sink_x;
+	__shared__ bool swtch;
+	__shared__ array<float, NDIM>* others;
+	__shared__ array<float, NDIM>* next_others;
+	__shared__ int other_cnt;
+	if (tid == 0) {
+		swtch = false;
+		others = others1;
+		next_others = others2;
+		other_cnt = 0;
+		h2 = opts.hsoft*opts.hsoft;
+	}
 	__syncthreads();
 	int ndirect = 0;
 	int nindirect = 0;
@@ -291,6 +303,48 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		}
 	}
 	__syncthreads();
+
+	const auto accumulate = [&]() {
+		const tree& self = *(tree_base + leaf_list[myindex]);
+		for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
+			const auto& sink_x = sink->x;
+			const int count = min(other_cnt,OTHERSMAX);
+			for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
+				array<float, NDIM> X;
+				{
+					const auto& source_x = others[oi];
+					for (int dim = 0; dim < NDIM; dim++) {
+						const float x = source_x[dim] - sink_x[dim];
+						const float absx = fabs(x);  // 1
+						X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx)); // 5
+					}
+				}
+				{
+					float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2],h2));
+					Xinv3 = Xinv3 * Xinv3 * Xinv3;
+					const int index = sink - self.part_begin;
+					for (int dim = 0; dim < NDIM; dim++) {
+						F[index][dim] += X[dim] * Xinv3; // 2
+					}
+				}
+				myflops[tid] += 42;
+			}
+		}
+		__syncthreads();
+		if (tid == 0) {
+			other_cnt -= OTHERSMAX;
+			swtch = !swtch;
+			if( swtch ) {
+				others = others2;
+				next_others = others1;
+			} else {
+				others = others1;
+				next_others = others2;
+			}
+		}
+		__syncthreads();
+
+	};
 	if (myindex < leaf_count) {
 		int depth;
 		const tree& self = *(tree_base + leaf_list[myindex]);
@@ -328,50 +382,37 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			assert(!(!opened && depth == 0));
 			if (opened && other.leaf) {
 				ndirect++;
-				for (auto* sink = self.part_begin ; sink < self.part_end; sink ++) {
-					const auto sink_x = sink->x;
-					for (auto* source = other.part_begin + tid; source < other.part_end; source+= KICKWARPSIZE) {
-						const auto source_x = source->x;
-						array<float, NDIM> X;
-						for (int dim = 0; dim < NDIM; dim++) {
-							float x = source_x[dim] - sink_x[dim];
-							float absx = abs(x);
-							X[dim] = copysignf(min(absx, 1.f - absx), x * (0.5f - absx));
+				for (auto* source = other.part_begin + tid; source < other.part_end; source += KICKWARPSIZE) {
+					const auto source_x = source->x;
+					int index = atomicAdd(&other_cnt, 1);
+					if( index < OTHERSMAX) {
+						others[index] = source_x;
+						if( index >= OTHERSMAX) {
+							printf( "Internal buffer exceeded %s %i\n", __FILE__, __LINE__);
+							__trap();
 						}
-						float X2 = 0.f;
-						for (int dim = 0; dim < NDIM; dim++) {
-							X2 += X[dim] * X[dim];
+					} else {
+						if( index-OTHERSMAX >= OTHERSMAX) {
+							printf( "Internal buffer exceeded %s %i\n", __FILE__, __LINE__);
+							__trap();
 						}
-						float Xinv = rsqrtf(X2);
-						float Xinv3 = Xinv * Xinv * Xinv;
-						for (int dim = 0; dim < NDIM; dim++) {
-							F[sink - self.part_begin][dim] += X[dim] * Xinv3;
-						}
-						myflops[tid] += 33;
+						next_others[index - OTHERSMAX] = source_x;
 					}
 				}
+				__syncthreads();
 			} else {
-				const auto source_x = other_x;
-				for (auto* sink = self.part_begin + tid; sink < self.part_end; sink += KICKWARPSIZE) {
-					const auto sink_x = sink->x;
-					array<float, NDIM> X;
-					for (int dim = 0; dim < NDIM; dim++) {
-						float x = source_x[dim] - sink_x[dim];
-						float absx = abs(x);
-						X[dim] = copysignf(min(absx, 1.f - absx), x * (0.5f - absx));
+				if (tid == 0) {
+					others[other_cnt++] = other_x;
+					if( other_cnt > OTHERSMAX) {
+						printf( "Internal buffer exceeded %s %i\n", __FILE__, __LINE__);
+						__trap();
 					}
-					float X2 = 0.f;
-					for (int dim = 0; dim < NDIM; dim++) {
-						X2 += X[dim] * X[dim];
-					}
-					float Xinv = rsqrtf(X2);
-					float Xinv3 = Xinv * Xinv * Xinv;
-					for (int dim = 0; dim < NDIM; dim++) {
-						F[sink - self.part_begin][dim] += X[dim] * Xinv3;
-					}
-					myflops[tid] += 33;
 				}
+				__syncthreads();
 				nindirect++;
+			}
+			if( other_cnt >= OTHERSMAX) {
+				accumulate();
 			}
 			__syncthreads();
 			if (!opened || pointers[depth]->leaf) {
@@ -394,8 +435,8 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				done = true;
 			}
 		} while (!done);
-
 	}
+	accumulate();
 	__syncthreads();
 	for (int P = KICKWARPSIZE / 2; P >= 1; P /= 2) {
 		if (tid < P) {
@@ -414,7 +455,7 @@ __device__
 void tree::kick(tree* root, int rung, float dt) {
 	int blocks_needed = (leaf_count - 1) + 1;
 	int block_size = SQRT(float(blocks_needed -1 )) + 1;
-	assert(block_size*block_size*KICKWARPSIZE >= leaf_count);
+	assert(block_size*block_size>= leaf_count);
 	dim3 dim;
 	dim.x = dim.y = block_size;
 	dim.z = 1;

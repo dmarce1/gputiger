@@ -261,6 +261,7 @@ int main() {
 	CUDA_CHECK(cudaDeviceGetLimit(&stack_size, cudaLimitStackSize));
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapsize));
 	CUDA_CHECK(cudaDeviceGetLimit(&heapsize, cudaLimitMallocHeapSize));
+	CUDA_CHECK(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
 	printf( "heapsize = %li\n", heapsize/1024/1024);
 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
 	particle* parts_ptr;
@@ -283,9 +284,10 @@ int main() {
 	//	params.box_size = 613.0 / 2160.0 * params.Ngrid;
 	params.nout = 64;
 	params.max_kernel_depth = 10;
-	params.parts_per_bucket = 100;
+	params.parts_per_bucket = 128;
 	params.opening_crit = 0.5;
 	params.nparts = params.Ngrid * params.Ngrid * params.Ngrid;
+	params.hsoft = params.Ngrid / 50.0;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);

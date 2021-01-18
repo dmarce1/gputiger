@@ -23,6 +23,7 @@
 
 
 struct options {
+	float hsoft;
 	float max_overden;
 	float h;
 	float Y;
