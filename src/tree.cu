@@ -318,7 +318,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		do {
 			const auto& other = *pointers[depth];
 			array<float, NDIM> other_x = other.pole.xcom;
-			const float w = other.box.end[0] - other.box.begin[0];
+			const float w = (other.box.end[0] - other.box.begin[0])*SQRT(0.75);
 			float dist2 = float(0);
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -342,6 +342,10 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				dir.p = &part;
 				dir.t = &other;
 				int index = atomicAdd(&next_direct_index, 1);
+				if( index >= 16*1024) {
+					printf( "Internal buffer exceeded\n");
+					__trap();
+				}
 				directs[index] = dir;
 			}
 			if (!opened || pointers[depth]->leaf) {
