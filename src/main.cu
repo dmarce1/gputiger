@@ -252,7 +252,7 @@ int main() {
 
 	size_t stack_size;
 	size_t desired_stack_size = 4 * 1024;
-	size_t rlimit = 5;
+	size_t rlimit = 10;
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, rlimit));
 	CUDA_CHECK(cudaDeviceGetLimit(&rlimit, cudaLimitDevRuntimeSyncDepth));
 	printf("CUDA recursion limit = %li\n", rlimit);
@@ -272,7 +272,7 @@ int main() {
 	params.omega_b = 0.0240 / (params.h * params.h);
 	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
-	params.Ngrid = 256;
+	params.Ngrid = 16;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
 	params.box_size = 1000;

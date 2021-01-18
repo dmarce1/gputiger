@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                               static tree** arena;
+                                                                    static tree** arena;
 
 __device__
 static int next_index;
@@ -17,7 +17,7 @@ __device__
 static int active_count;
 
 __device__
-                                               static particle* part_base;
+                                                    static particle* part_base;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes) {
@@ -182,7 +182,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 						workspace->end[ci], workspace->cranges[ci], depth + 1, rung);
 				__syncthreads();
 				if (tid == 0) {
-					workspace->count[ci] += this_pole.mass;
+					workspace->count[ci] = this_pole.mass;
 				}
 				if (tid < NDIM) {
 					workspace->poles[ci][tid] = this_pole.mass * this_pole.xcom[tid];
@@ -208,7 +208,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				if (depth == opts.max_kernel_depth) {
 					threadcnt = WARPSIZE;
 				} else {
-					threadcnt = min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT);
+					threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
 				}
 				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1, rung);
 				CUDA_CHECK(cudaGetLastError());
@@ -248,37 +248,39 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 		__syncthreads();
 	}
 	__syncthreads();
-	if (tid < WARPSIZE) {
-		for (int P = WARPSIZE / 2; P >= 1; P /= 2) {
-			if (tid < P) {
-				for (int dim = 0; dim < NDIM; dim++) {
-					poles[dim] += workspace->poles[tid + P][dim];
-				}
-				count += workspace->count[tid + P];
+	for (int P = WARPSIZE / 2; P >= 1; P /= 2) {
+		if (tid < P) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				poles[dim] += workspace->poles[tid + P][dim];
 			}
-			__syncthreads();
+			count += workspace->count[tid + P];
 		}
-		if (tid == 0) {
-			pole.mass = count;
+		__syncthreads();
+	}
+	__syncthreads();
+	if (tid == 0) {
+		pole.mass = count;
 
-		}
 	}
 	__syncthreads();
 	if (tid < NDIM) {
 		if (pole.mass != float(0)) {
-			pole.xcom[tid] = poles[tid] / pole.mass;
+			pole.xcom[tid] = workspace->poles[0][tid] / pole.mass;
 		} else {
 			pole.xcom[tid] = float(0);
 		}
 	}
-	assert(abs(pole.xcom[0]) < 10.0);
-	assert(abs(pole.xcom[1]) < 10.0);
-	assert(abs(pole.xcom[2]) < 10.0);
 	__syncthreads();
+	assert(abs(pole.xcom[0]) <= 1.0);
+	assert(abs(pole.xcom[1]) <= 1.0);
+	assert(abs(pole.xcom[2]) <= 1.0);
+	assert(abs(pole.xcom[0]) >= 0.0);
+	assert(abs(pole.xcom[1]) >= 0.0);
+	assert(abs(pole.xcom[2]) >= 0.0);
 	return pole;
 }
 
-#define KICKWARPSIZE 128
+#define KICKWARPSIZE 32
 
 __global__
 void tree_kick(tree* root, int rung, float dt) {
@@ -288,6 +290,7 @@ void tree_kick(tree* root, int rung, float dt) {
 	const int& dy = gridDim.y;
 	const int& xi = blockIdx.y;
 	const int myindex = dz * (dy * xi + yi) + zi;
+	int directs = 0;
 	if (myindex < active_count) {
 		int depth;
 		particle& part = *(part_base + active_list[myindex]);
@@ -309,32 +312,43 @@ void tree_kick(tree* root, int rung, float dt) {
 				dist = ewald_distance(part.x[dim] - other_x[dim]);
 				dist2 += dist * dist;
 			}
+			//		printf("%e %e %e\n", other_x[0], other_x[1], other_x[2]);
+			assert(abs(other_x[0]) <= 1.0);
+			assert(abs(other_x[1]) <= 1.0);
+			assert(abs(other_x[2]) <= 1.0);
+			assert(abs(other_x[0]) >= 0.0);
+			assert(abs(other_x[1]) >= 0.0);
+			assert(abs(other_x[2]) >= 0.0);
 			dist = SQRT(dist2);
 			bool opened = w > opts.opening_crit * dist;
 			assert(!(!opened && depth == 0));
+			if (opened && pointers[depth]->leaf) {
+				directs++;
+			}
 			if (!opened || pointers[depth]->leaf) {
+				child_indexes[depth] = 0;
 				depth--;
-				while (child_indexes[depth] == NCHILD - 1 && depth) {
+				while (depth && child_indexes[depth] == NCHILD - 1) {
 					child_indexes[depth] = 0;
 					depth--;
 				}
 				child_indexes[depth]++;
-				done = child_indexes[depth] == NCHILD;
 			}
-			if (!done) {
+			if (!(child_indexes[0] == NCHILD)) {
 				depth++;
 				assert(child_indexes[depth - 1] < NCHILD);
 				assert(child_indexes[depth - 1] >= 0);
 				assert(depth < MAXDEPTH);
 				assert(depth >= 0);
-				child_indexes[depth] = 0;
 				pointers[depth] = pointers[depth - 1]->children[child_indexes[depth - 1]];
+			} else {
+				done = true;
 			}
 		} while (!done);
 
 	}
 	__syncthreads();
-
+//	printf( "%i\n", directs);
 }
 
 __device__
