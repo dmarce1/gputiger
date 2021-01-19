@@ -11,9 +11,11 @@
 #include <gputiger/params.hpp>
 #include <gputiger/math.hpp>
 
+
 __device__ void fft_basis(cmplx* X, int N);
 
-__global__
+
+__device__
 void fft3d(cmplx* Y, const cmplx* expi, int N);
 
 

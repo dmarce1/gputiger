@@ -46,7 +46,7 @@ __device__ float zeldovich_overdensity(cmplx* den, const cmplx* basis, const cmp
 	}
 	__syncthreads();
 	if (thread == 0) {
-		fft3d<<<1,MAXTHREADCOUNT>>>(den,basis, N);
+		fft3d(den,basis, N);
 		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());
 	}
@@ -109,7 +109,7 @@ __device__ float zeldovich_displacements(cmplx* phi, const cmplx* basis, const c
 	}
 	__syncthreads();
 	if (thread == 0) {
-		fft3d<<<1,MAXTHREADCOUNT>>>(phi,basis, N);
+		fft3d(phi,basis, N);
 		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());
 	}
@@ -173,7 +173,7 @@ __device__ float zeldovich_velocities(cmplx* vel_k, const cmplx* basis, const cm
 	}
 	__syncthreads();
 	if (thread == 0) {
-		fft3d<<<1,MAXTHREADCOUNT>>>(vel_k,basis, N);
+		fft3d(vel_k,basis, N);
 		CUDA_CHECK(cudaGetLastError());
 
 		CUDA_CHECK(cudaDeviceSynchronize());
