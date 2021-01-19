@@ -8,6 +8,7 @@
 #include <gputiger/zeldovich.hpp>
 #include <gputiger/particle.hpp>
 #include <gputiger/tree.hpp>
+#include <gputiger/ewald.hpp>
 
 #define BLOCK_SIZE 256
 
@@ -31,11 +32,22 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__shared__ interp_functor<float>* vel_k;
 	__shared__ cos_state* states;
 	__shared__ cmplx* basis;
+	__shared__ ewald_table_t* etable;
 	const int N = opts.Ngrid;
 	const int N3 = N * N * N;
 	cmplx* phi = (cmplx*) arena;
 	cmplx* rands = ((cmplx*) arena) + N3;
 	particle* parts = (particle*) arena;
+
+	if( thread == 0 ) {
+		printf( "Computing ewald tables\n");
+		CUDA_CHECK(cudaMalloc(&etable, sizeof(ewald_table_t)));
+		compute_ewald_table<<<EWALD_DIM*EWALD_DIM, EWALD_DIM>>>(etable);
+	}
+	__syncthreads();
+	if( thread == 0) {
+		CUDA_CHECK(cudaDeviceSynchronize());
+	}
 	if (thread == 0) {
 		zeroverse_ptr = new zero_order_universe;
 		create_zero_order_universe(zeroverse_ptr, 1.0);
@@ -241,6 +253,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 		CUDA_CHECK(cudaFree(basis));
 		CUDA_CHECK(cudaFree(states));
 		CUDA_CHECK(cudaFree(root));
+		CUDA_CHECK(cudaFree(etable));
 		delete den_k;
 		delete vel_k;
 	}
@@ -277,7 +290,7 @@ int main() {
 	params.omega_b = 0.0240 / (params.h * params.h);
 	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
-	params.Ngrid = 256;
+	params.Ngrid = 512;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
 	params.box_size = 1000;
