@@ -278,7 +278,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	__shared__ float h2;
 	__shared__ int myflops[KICKWARPSIZE];
 	myflops[tid] = 0.f;
-	__shared__ bool opened;
+	 bool opened;
 	__shared__ array<float, NDIM> F[PARTMAX];
 	__shared__ array<float, NDIM> others1[OTHERSMAX];
 	__shared__ array<float, NDIM> others2[OTHERSMAX];
