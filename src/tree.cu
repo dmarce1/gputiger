@@ -282,7 +282,6 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	__shared__ array<float, NDIM> F[PARTMAX];
 	__shared__ array<float, NDIM> others1[OTHERSMAX];
 	__shared__ array<float, NDIM> others2[OTHERSMAX];
-	__shared__ array<float, NDIM> sink_x;
 	__shared__ bool swtch;
 	__shared__ array<float, NDIM>* others;
 	__shared__ array<float, NDIM>* next_others;
@@ -305,6 +304,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	__syncthreads();
 
 	const auto accumulate = [&]() {
+		__syncthreads();
 		const tree& self = *(tree_base + leaf_list[myindex]);
 		for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
 			const auto& sink_x = sink->x;
@@ -368,7 +368,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			float other_w = 0.0f;
 			float self_w = 0.0f;
 			for (int dim = 0; dim < NDIM; dim++) {
-				other_w += POW(other.box.end[dim] - other.box.begin[dim], 2.f);
+				other_w += pow2(other.box.end[dim] - other.box.begin[dim]);
 			}
 			other_w = SQRT(other_w) / 2.f;
 			float dist2 = 0.f;
@@ -380,6 +380,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			dist = SQRT(dist2);
 			opened = (self_w + other_w) > opts.opening_crit * dist;
 			assert(!(!opened && depth == 0));
+			__syncthreads();
 			if (opened && other.leaf) {
 				ndirect++;
 				for (auto* source = other.part_begin + tid; source < other.part_end; source += KICKWARPSIZE) {
@@ -387,14 +388,13 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 					int index = atomicAdd(&other_cnt, 1);
 					(index < OTHERSMAX ? others[index] :next_others[index - OTHERSMAX]) = source_x;
 				}
-				__syncthreads();
 			} else {
 				if (tid == 0) {
 					others[other_cnt++] = other_x;
 				}
-				__syncthreads();
 				nindirect++;
 			}
+			__syncthreads();
 			if( other_cnt >= OTHERSMAX) {
 				accumulate();
 			}
@@ -418,6 +418,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			} else {
 				done = true;
 			}
+			__syncthreads();
 		} while (!done);
 	}
 	accumulate();
