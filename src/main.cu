@@ -299,7 +299,11 @@ int main() {
 	CUDA_CHECK(cudaMallocManaged(&parts_ptr, sizeof(particle) * N3));
 	size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
 	printf("Allocating arena of %li Mbytes\n", (arena_size / 1024 / 1024));
-	CUDA_CHECK(cudaMalloc(&arena, arena_size));
+	CUDA_CHECK(cudaMallocManaged(&arena, arena_size));
+	if( arena == nullptr) {
+		printf( "Not enough memory\n");
+		abort();
+	}
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, params);
 	CUDA_CHECK(cudaGetLastError());
 

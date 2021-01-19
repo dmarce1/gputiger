@@ -20,8 +20,7 @@ __device__ inline float ewald_distance(float x) {
 struct particle {
 	array<float, NDIM> x;
 	array<float, NDIM> v;
-	int32_t rung;
-	int32_t padding;
+	int8_t rung;
 };
 
 #endif /* PARTICLE_HPP_ */

@@ -385,28 +385,12 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				for (auto* source = other.part_begin + tid; source < other.part_end; source += KICKWARPSIZE) {
 					const auto source_x = source->x;
 					int index = atomicAdd(&other_cnt, 1);
-					if( index < OTHERSMAX) {
-						others[index] = source_x;
-						if( index >= OTHERSMAX) {
-							printf( "Internal buffer exceeded %s %i\n", __FILE__, __LINE__);
-							__trap();
-						}
-					} else {
-						if( index-OTHERSMAX >= OTHERSMAX) {
-							printf( "Internal buffer exceeded %s %i\n", __FILE__, __LINE__);
-							__trap();
-						}
-						next_others[index - OTHERSMAX] = source_x;
-					}
+					(index < OTHERSMAX ? others[index] :next_others[index - OTHERSMAX]) = source_x;
 				}
 				__syncthreads();
 			} else {
 				if (tid == 0) {
 					others[other_cnt++] = other_x;
-					if( other_cnt > OTHERSMAX) {
-						printf( "Internal buffer exceeded %s %i\n", __FILE__, __LINE__);
-						__trap();
-					}
 				}
 				__syncthreads();
 				nindirect++;
