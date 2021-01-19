@@ -14,7 +14,6 @@
 #include <gputiger/vector.hpp>
 #include <gputiger/params.hpp>
 
-
 #define POW(a,b) powf(a,b)
 #define LOG(a) logf(a)
 #define EXP(a) expf(a)
@@ -22,8 +21,6 @@
 #define COS(a) cosf(a)
 #define SIN(a) sinf(a)
 #define SINCOS(a,b,c) sincosf(a,b,c)
-
-
 
 class cmplx {
 	float x, y;
@@ -110,14 +107,11 @@ public:
 	}
 };
 
-
-__device__ inline cmplx operator*(float a, cmplx b) {
+__device__  inline cmplx operator*(float a, cmplx b) {
 	return b * a;
 }
 
-
-
-__device__ inline cmplx expc(cmplx z) {
+__device__  inline cmplx expc(cmplx z) {
 	float x, y;
 	float t = EXP(z.real());
 	SINCOS(z.imag(), &y, &x);
@@ -126,9 +120,8 @@ __device__ inline cmplx expc(cmplx z) {
 	return cmplx(x, y);
 }
 
-
 __device__
-double find_root(nvstd::function<double(double)> f) ;
+double find_root(nvstd::function<double(double)> f);
 
 template<class FUNC, class REAL>
 __global__
@@ -184,7 +177,6 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 			}
 			*result = sum2;
 		}
-		break;
 		N = 2 * (N - 1) + 1;
 		__syncthreads();
 	} while (err > toler);
@@ -196,6 +188,10 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 	}
 	__syncthreads();
 
+}
+
+__device__ inline float pow2(float r) {
+	return r * r;
 }
 
 __device__

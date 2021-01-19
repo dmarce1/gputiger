@@ -39,13 +39,13 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	cmplx* rands = ((cmplx*) arena) + N3;
 	particle* parts = (particle*) arena;
 
-	if( thread == 0 ) {
-		printf( "Computing ewald tables\n");
+	if (thread == 0) {
+		printf("Computing ewald tables\n");
 		CUDA_CHECK(cudaMalloc(&etable, sizeof(ewald_table_t)));
 		compute_ewald_table<<<EWALD_DIM*EWALD_DIM, EWALD_DIM>>>(etable);
 	}
 	__syncthreads();
-	if( thread == 0) {
+	if (thread == 0) {
 		CUDA_CHECK(cudaDeviceSynchronize());
 	}
 	if (thread == 0) {
@@ -65,21 +65,20 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	int Nk = opts.Ngrid * SQRT(3) + 1;
 	if (thread == 0) {
 		printf("\nNormalizing Einstein Boltzman solutions to a present day sigma8 of %e\n", opts.sigma8);
-		/*		result_ptr = new float;
-		 func_ptr = new sigma8_integrand;
-		 */
+		result_ptr = new float;
+		func_ptr = new sigma8_integrand;
 		CUDA_CHECK(cudaMalloc(&states, sizeof(cos_state) * Nk));
 		CUDA_CHECK(cudaMalloc(&basis, sizeof(cmplx) * opts.Ngrid / 2));
 		den_k = new interp_functor<float>;
 		vel_k = new interp_functor<float>;
-		/*		func_ptr->uni = zeroverse_ptr;
-		 func_ptr->littleh = opts.h;
-		 integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
-		 (float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
-		 CUDA_CHECK(cudaGetLastError());
-		 CUDA_CHECK(cudaDeviceSynchronize());
-		 *result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
-		 printf("The normalization value is %e\n", *result_ptr);*/
+		func_ptr->uni = zeroverse_ptr;
+		func_ptr->littleh = opts.h;
+		integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
+				(float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
+		CUDA_CHECK(cudaGetLastError());
+		CUDA_CHECK(cudaDeviceSynchronize());
+		*result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
+		printf("The normalization value is %e\n", *result_ptr);
 	}
 
 	__syncthreads();
@@ -275,7 +274,7 @@ int main() {
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitMallocHeapSize, heapsize));
 	CUDA_CHECK(cudaDeviceGetLimit(&heapsize, cudaLimitMallocHeapSize));
 	CUDA_CHECK(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
-	printf( "heapsize = %li\n", heapsize/1024/1024);
+	printf("heapsize = %li\n", heapsize / 1024 / 1024);
 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
 	particle* parts_ptr;
 	printf("Stack Size = %li\n", stack_size);
@@ -290,7 +289,7 @@ int main() {
 	params.omega_b = 0.0240 / (params.h * params.h);
 	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
-	params.Ngrid = 512;
+	params.Ngrid = 128;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
 	params.box_size = 1000;
@@ -313,8 +312,8 @@ int main() {
 	size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
 	printf("Allocating arena of %li Mbytes\n", (arena_size / 1024 / 1024));
 	CUDA_CHECK(cudaMallocManaged(&arena, arena_size));
-	if( arena == nullptr) {
-		printf( "Not enough memory\n");
+	if (arena == nullptr) {
+		printf("Not enough memory\n");
 		abort();
 	}
 	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, params);

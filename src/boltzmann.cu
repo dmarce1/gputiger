@@ -9,8 +9,10 @@ __device__ float sigma8_integrand::operator()(float x) const {
 	einstein_boltzmann(&U, uni, k, uni->amin, 1.f);
 	float oc = opts.omega_c;
 	float ob = opts.omega_b;
-	float P = POW((oc*U[deltaci] + ob*U[deltabi])/(oc+ob), 2);
-	return c0 * P * POW((SIN(k*R) - k * R *COS(k*R)), 2) * pow(k, -3);
+	float tmp = (oc*U[deltaci] + ob*U[deltabi])/(oc+ob);
+	float P = tmp * tmp;
+	tmp = (SIN(k*R) - k * R *COS(k*R));
+	return c0 * P * tmp * tmp * pow(k, -3);
 }
 
 __device__ void einstein_boltzmann_init(cos_state* uptr, const zero_order_universe* uni_ptr, float k,
@@ -236,8 +238,8 @@ __device__ void einstein_boltzmann_interpolation_function(interp_functor<float>*
 		float k = EXP(logkmin + (float ) i * dlogk);
 		float eps = k / (astop * H);
 		einstein_boltzmann(U + i, uni, k, astart, astop);
-		den_k[i] = POW(ob*U[i][deltabi]+oc*U[i][deltaci], 2);
-		vel_k[i] = POW((ob*(eps*U[i][thetabi]+(float)0.5*U[i][hdoti]) + oc*((float) 0.5 * U[i][hdoti]))/k*H, 2.f);
+		den_k[i] = pow2(ob*U[i][deltabi]+oc*U[i][deltaci]);
+		vel_k[i] = pow2((ob*(eps*U[i][thetabi]+(float)0.5*U[i][hdoti]) + oc*((float) 0.5 * U[i][hdoti]))/k*H);
 	}
 	__syncthreads();
 	if (thread == 0) {
