@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                static tree* tree_base;
+                                                                                                     static tree* tree_base;
 
 __device__
 static int next_index;
@@ -82,14 +82,17 @@ void tree_sort(tree_sort_type* trees, particle* swap_space, int depth, int rung)
 	particle* e = trees->ends[bid];
 	particle* this_swap = swap_space + (b - base);
 	range box = trees->boxes[bid];
-	trees->poles[bid] = trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth, rung);
+	const auto tmp = trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth, rung);
+	if( threadIdx.x == 0 ) {
+		trees->poles[bid] = tmp;
+	}
 	__syncthreads();
 }
 
 __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
 		range box_, int depth_, int rung) {
 	const int tid = threadIdx.x;
-	const int block_size = blockDim.x;
+	//const int block_size = blockDim.x;
 	if (tid == 0) {
 		if (depth_ >= MAXDEPTH) {
 			printf("Maximum depth exceeded in sort\n");
@@ -104,8 +107,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	float midx;
 	particle* mid;
 	__syncthreads();
-	/*	if (tid == 0) {
-	 for (auto* ptr = part_begin; ptr < part_end; ptr++) {
+	/*	for (auto* ptr = part_begin + tid; ptr < part_end; ptr+=blockDim.x) {
 	 if (!box.in_range(ptr->x)) {
 	 printf("Particle out of range at depth %i\n", depth);
 	 for (int dim = 0; dim < NDIM; dim++) {
@@ -114,21 +116,20 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	 printf("\n");
 	 //				__trap();
 	 }
-	 }
 	 }*/
+	__syncthreads();
 //	printf("Sorting at depth %i\n", depth);
 	__syncthreads();
 	auto& poles = workspace->poles[tid];
 	auto& count = workspace->count[tid];
-	if (tid < WARPSIZE) {
-		for (int dim = 0; dim < NDIM; dim++) {
-			poles[dim] = 0;
-		}
-		count = float(0);
-	}
-	__syncthreads();
 	if (pend - pbegin > opts.parts_per_bucket) {
-//		auto tm = clock();
+		if (tid < NCHILD) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				poles[dim] = 0;
+			}
+			count = float(0);
+		}
+		__syncthreads();
 		float max_span = 0.0;
 		int long_dim;
 		for (int dim = 0; dim < NDIM; dim++) {
@@ -175,7 +176,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			tree_sort_type* &childdata = workspace->tree_sort;
 
 			if (tid == 0) {
-				CUDA_CHECK(cudaMalloc(&childdata, sizeof(tree_sort_type)));
+				CUDA_MALLOC(&childdata, sizeof(tree_sort_type));
 			}
 			__syncthreads();
 			if (tid < NCHILD) {
@@ -188,12 +189,15 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			__syncthreads();
 			if (tid == 0) {
 				int threadcnt;
-				if (depth == opts.max_kernel_depth - 1) {
-					threadcnt = WARPSIZE;
-				} else {
-					threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
-				}
+		//		if (depth == opts.max_kernel_depth - 1) {
+					threadcnt = 2*WARPSIZE;
+		//		} else {
+		//			threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
+		//		}
 				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1, rung);
+			}
+			__syncthreads();
+			if (tid == 0) {
 				CUDA_CHECK(cudaGetLastError());
 				CUDA_CHECK(cudaDeviceSynchronize());
 			}
@@ -211,7 +215,25 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			}
 			__syncthreads();
 		}
+		__syncthreads();
+		for (int P = NCHILD / 2; P >= 1; P /= 2) {
+			if (tid < P) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					poles[dim] += workspace->poles[tid + P][dim];
+				}
+				count += workspace->count[tid + P];
+			}
+			__syncthreads();
+		}
+
 	} else {
+		if (tid < WARPSIZE) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				poles[dim] = 0.f;
+			}
+			count = 0.f;
+		}
+		__syncthreads();
 		if (tid == 0) {
 			leaf = true;
 			int index = atomicAdd(&leaf_count, 1);
@@ -223,20 +245,19 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				for (int dim = 0; dim < NDIM; dim++) {
 					poles[dim] += p->x[dim];
 				}
-				count += float(1);
+				count += 1.f;
 			}
 		}
 		__syncthreads();
-	}
-	__syncthreads();
-	for (int P = WARPSIZE / 2; P >= 1; P /= 2) {
-		if (tid < P) {
-			for (int dim = 0; dim < NDIM; dim++) {
-				poles[dim] += workspace->poles[tid + P][dim];
+		for (int P = WARPSIZE / 2; P >= 1; P /= 2) {
+			if (tid < P) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					poles[dim] += workspace->poles[tid + P][dim];
+				}
+				count += workspace->count[tid + P];
 			}
-			count += workspace->count[tid + P];
+			__syncthreads();
 		}
-		__syncthreads();
 	}
 	__syncthreads();
 	if (tid == 0) {
@@ -278,12 +299,10 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	const int& xi = blockIdx.y;
 	const int myindex = (gridDim.x * xi + yi);
 	__shared__ float h2;
-	__shared__ array<int,KICKWARPSIZE> myflops;
-	myflops[tid] = 0.f;
-	 bool opened;
-	__shared__ array<array<float, NDIM>,PARTMAX> F;
-	__shared__ array<array<float, NDIM>,OTHERSMAX> others1;
-	__shared__ array<array<float, NDIM>,OTHERSMAX> others2;
+	bool opened;
+	__shared__ array<array<float, NDIM>, PARTMAX> F;
+	__shared__ array<array<float, NDIM>, OTHERSMAX> others1;
+	__shared__ array<array<float, NDIM>, OTHERSMAX> others2;
 	__shared__ bool swtch;
 	__shared__ array<float, NDIM>* others;
 	__shared__ array<float, NDIM>* next_others;
@@ -293,7 +312,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		others = others1.data();
 		next_others = others2.data();
 		other_cnt = 0;
-		h2 = opts.hsoft*opts.hsoft;
+		h2 = opts.hsoft * opts.hsoft;
 	}
 	__syncthreads();
 	int ndirect = 0;
@@ -304,49 +323,6 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		}
 	}
 	__syncthreads();
-
-	const auto accumulate = [&]() {
-		__syncthreads();
-		const tree& self = *(tree_base + leaf_list[myindex]);
-		for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
-			const auto& sink_x = sink->x;
-			const int count = min(other_cnt,OTHERSMAX);
-			for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
-				array<float, NDIM> X;
-				{
-					const auto& source_x = others[oi];
-					for (int dim = 0; dim < NDIM; dim++) {
-						const float x = source_x[dim] - sink_x[dim];
-						const float absx = fabs(x);  // 1
-						X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx)); // 5
-					}
-				}
-				{
-					float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2],h2));
-					Xinv3 = Xinv3 * Xinv3 * Xinv3;
-					const int index = sink - self.part_begin;
-					for (int dim = 0; dim < NDIM; dim++) {
-						F[index][dim] += X[dim] * Xinv3; // 2
-					}
-				}
-				myflops[tid] += 42;
-			}
-		}
-		__syncthreads();
-		if (tid == 0) {
-			other_cnt -= OTHERSMAX;
-			swtch = !swtch;
-			if( swtch ) {
-				others = others2.data();
-				next_others = others1.data();
-			} else {
-				others = others1.data();
-				next_others = others2.data();
-			}
-		}
-		__syncthreads();
-
-	};
 	if (myindex < leaf_count) {
 		int depth;
 		const tree& self = *(tree_base + leaf_list[myindex]);
@@ -358,7 +334,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		pointers[0] = root;
 		depth = 0;
 		bool done = false;
-		float self_w = 0.0;
+		float self_w = 0.f;
 		for (int dim = 0; dim < NDIM; dim++) {
 			self_w += POW(self.box.end[dim] - self.box.begin[dim], 2);
 		}
@@ -368,7 +344,6 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			const auto& other = *pointers[depth];
 			array<float, NDIM> other_x = other.pole.xcom;
 			float other_w = 0.0f;
-			float self_w = 0.0f;
 			for (int dim = 0; dim < NDIM; dim++) {
 				other_w += pow2(other.box.end[dim] - other.box.begin[dim]);
 			}
@@ -388,17 +363,17 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				for (auto* source = other.part_begin + tid; source < other.part_end; source += KICKWARPSIZE) {
 					const auto source_x = source->x;
 					int index = atomicAdd(&other_cnt, 1);
-					(index < OTHERSMAX ? others[index] :next_others[index - OTHERSMAX]) = source_x;
+					if (index < OTHERSMAX) {
+						others[index] = source_x;
+					} else {
+						next_others[index - OTHERSMAX] = source_x;
+					}
 				}
 			} else {
 				if (tid == 0) {
 					others[other_cnt++] = other_x;
 				}
 				nindirect++;
-			}
-			__syncthreads();
-			if( other_cnt >= OTHERSMAX) {
-				accumulate();
 			}
 			__syncthreads();
 			if (!opened || pointers[depth]->leaf) {
@@ -421,28 +396,58 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				done = true;
 			}
 			__syncthreads();
+			if (other_cnt >= OTHERSMAX || done) {
+				__syncthreads();
+				const tree& self = *(tree_base + leaf_list[myindex]);
+				if (tid == 0) {
+					atomicAdd(flops, double(42 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX)));
+				}
+				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
+					const auto& sink_x = sink->x;
+					const int count = min(other_cnt, OTHERSMAX);
+					for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
+						array<float, NDIM> X;
+						{
+							const auto& source_x = others[oi];
+							for (int dim = 0; dim < NDIM; dim++) {
+								const float x = source_x[dim] - sink_x[dim];
+								const float absx = fabs(x);  // 1
+								X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx));  // 5
+							}
+						}
+						{
+							float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2], h2));
+							Xinv3 = Xinv3 * Xinv3 * Xinv3;
+							const int index = sink - self.part_begin;
+							for (int dim = 0; dim < NDIM; dim++) {
+								F[index][dim] += X[dim] * Xinv3; // 2
+							}
+						}
+					}
+				}
+				__syncthreads();
+				if (tid == 0) {
+					other_cnt -= OTHERSMAX;
+					swtch = !swtch;
+					if (swtch) {
+						others = others2.data();
+						next_others = others1.data();
+					} else {
+						others = others1.data();
+						next_others = others2.data();
+					}
+				}
+				__syncthreads();
+			}
 		} while (!done);
-		accumulate();
 	}
-	__syncthreads();
-	for (int P = KICKWARPSIZE / 2; P >= 1; P /= 2) {
-		if (tid < P) {
-			myflops[tid] += myflops[tid + P];
-		}
-		__syncthreads();
-	}
-	if (tid == 0) {
-		atomicAdd(flops, myflops[0]);
-	}
-	__syncthreads();
-//	printf("%i %i\n", ndirect, nindirect);
 }
 
 __device__
 void tree::kick(tree* root, int rung, float dt) {
 	int blocks_needed = (leaf_count - 1) + 1;
 	int block_size = SQRT(float(blocks_needed -1 )) + 1;
-	assert(block_size*block_size>= leaf_count);
+	assert(block_size * block_size >= leaf_count);
 	dim3 dim;
 	dim.x = dim.y = block_size;
 	dim.z = 1;

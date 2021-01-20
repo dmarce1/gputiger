@@ -21,6 +21,20 @@
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
 
+#define CUDA_MALLOC( a, b ) \
+{ \
+	auto rc = cudaMalloc(a,b); \
+	if( rc != cudaSuccess ) { \
+		printf( "cudaMalloc failed on %i in %s with \"%s\"\n", __LINE__, __FILE__, cudaGetErrorString(rc)); \
+		__trap(); \
+	} else { \
+		if( a == nullptr ) { \
+			printf( "Failed to allocate memory on %i in %s\n", __LINE__, __FILE__); \
+			__trap(); \
+		} \
+	} \
+}
+
 
 struct options {
 	float hsoft;

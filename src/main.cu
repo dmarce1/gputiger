@@ -87,8 +87,8 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	if (thread == 0) {
 		printf("Computing start time for non-linear evolution\n");
 	}
-	float normalization = *result_ptr;
-//	float normalization = 6.221450e-09;
+//	float normalization = *result_ptr;
+	float normalization = 6.221450e-09;
 	if (thread == 0) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
@@ -108,17 +108,17 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 		printf("Initializing EB\n");
 	}
 	einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
-	int iter = 0;
+	//int iter = 0;
 	float logamin = LOG(zeroverse_ptr->amin);
 	float logamax = LOG(zeroverse_ptr->amax);
 	float drho;
-	float last_drho;
-	float last_a;
-	float dtau = taumax / opts.nout;
+//	float last_drho;
+//	float last_a;
+//	float dtau = taumax / opts.nout;
 	float taumin = 1.0 / (zeroverse_ptr->amin * zeroverse_ptr->hubble(zeroverse_ptr->amin));
 	float a = zeroverse_ptr->amin;
-	float tau;
-	/*for (tau = taumin; tau < taumax - dtau; tau += dtau) {
+	/*float tau;
+	for (tau = taumin; tau < taumax - dtau; tau += dtau) {
 	 last_a = a;
 	 a = zeroverse_ptr->conformal_time_to_scale_factor(tau + dtau);
 	 if (thread == 0) {
@@ -178,8 +178,8 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 		if (thread == 0) {
 			printf("Computing %c positions\n", 'x' + dim);
 		}
-		float xdisp;
 #ifndef RANDOM_INIT
+		float xdisp;
 		xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
 #endif
 		__syncthreads();
@@ -239,7 +239,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Sorting\n");
-		root_tree_sort<<<1,MAXTHREADCOUNT>>>(root, host_parts, parts, parts+N3, root_range, 0);
+		root_tree_sort<<<1,2*WARPSIZE>>>(root, host_parts, parts, parts+N3, root_range, 0);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
@@ -302,7 +302,7 @@ int main() {
 	params.omega_b = 0.0240 / (params.h * params.h);
 	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
-	params.Ngrid = 256;
+	params.Ngrid = 128;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
 	params.box_size = 1000;
@@ -310,7 +310,7 @@ int main() {
 	params.nout = 64;
 	params.max_kernel_depth = 10;
 	params.parts_per_bucket = 128;
-	params.opening_crit = 0.5;
+	params.opening_crit = 0.7;
 	params.nparts = params.Ngrid * params.Ngrid * params.Ngrid;
 	params.hsoft = params.Ngrid / 50.0;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
