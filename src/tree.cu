@@ -88,8 +88,8 @@ void tree_sort(tree_sort_type* trees, particle* swap_space, int depth, int rung)
 
 __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
 		range box_, int depth_, int rung) {
-	const int& tid = threadIdx.x;
-	const int& block_size = blockDim.x;
+	const int tid = threadIdx.x;
+	const int block_size = blockDim.x;
 	if (tid == 0) {
 		if (depth_ >= MAXDEPTH) {
 			printf("Maximum depth exceeded in sort\n");
@@ -156,7 +156,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			}
 		}
 		__syncthreads();
-		if (depth > opts.max_kernel_depth) {
+		if (depth >= opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {
 				particle* swap_base = swap_space + (workspace->begin[ci] - workspace->begin[0]);
 				monopole this_pole = children[ci]->sort(workspace + 1, swap_base, workspace->begin[ci],
@@ -173,6 +173,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			__syncthreads();
 		} else {
 			tree_sort_type* &childdata = workspace->tree_sort;
+
 			if (tid == 0) {
 				CUDA_CHECK(cudaMalloc(&childdata, sizeof(tree_sort_type)));
 			}
@@ -182,17 +183,19 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				childdata->tree_ptrs[tid] = children[tid];
 				childdata->begins[tid] = workspace->begin[tid];
 				childdata->ends[tid] = workspace->end[tid];
+				auto test = childdata->poles[tid].mass;
 			}
 			__syncthreads();
 			if (tid == 0) {
 				int threadcnt;
-				if (depth == opts.max_kernel_depth) {
+				if (depth == opts.max_kernel_depth - 1) {
 					threadcnt = WARPSIZE;
 				} else {
 					threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
 				}
 				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1, rung);
 				CUDA_CHECK(cudaGetLastError());
+				CUDA_CHECK(cudaDeviceSynchronize());
 			}
 			__syncthreads();
 			if (tid < NCHILD) {
@@ -204,7 +207,6 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			}
 			__syncthreads();
 			if (tid == 0) {
-				CUDA_CHECK(cudaDeviceSynchronize());
 				CUDA_CHECK(cudaFree(childdata));
 			}
 			__syncthreads();
@@ -276,20 +278,20 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	const int& xi = blockIdx.y;
 	const int myindex = (gridDim.x * xi + yi);
 	__shared__ float h2;
-	__shared__ int myflops[KICKWARPSIZE];
+	__shared__ array<int,KICKWARPSIZE> myflops;
 	myflops[tid] = 0.f;
 	 bool opened;
-	__shared__ array<float, NDIM> F[PARTMAX];
-	__shared__ array<float, NDIM> others1[OTHERSMAX];
-	__shared__ array<float, NDIM> others2[OTHERSMAX];
+	__shared__ array<array<float, NDIM>,PARTMAX> F;
+	__shared__ array<array<float, NDIM>,OTHERSMAX> others1;
+	__shared__ array<array<float, NDIM>,OTHERSMAX> others2;
 	__shared__ bool swtch;
 	__shared__ array<float, NDIM>* others;
 	__shared__ array<float, NDIM>* next_others;
 	__shared__ int other_cnt;
 	if (tid == 0) {
 		swtch = false;
-		others = others1;
-		next_others = others2;
+		others = others1.data();
+		next_others = others2.data();
 		other_cnt = 0;
 		h2 = opts.hsoft*opts.hsoft;
 	}
@@ -335,11 +337,11 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			other_cnt -= OTHERSMAX;
 			swtch = !swtch;
 			if( swtch ) {
-				others = others2;
-				next_others = others1;
+				others = others2.data();
+				next_others = others1.data();
 			} else {
-				others = others1;
-				next_others = others2;
+				others = others1.data();
+				next_others = others2.data();
 			}
 		}
 		__syncthreads();

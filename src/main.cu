@@ -10,6 +10,7 @@
 #include <gputiger/tree.hpp>
 #include <gputiger/ewald.hpp>
 
+#define RANDOM_INIT
 #define BLOCK_SIZE 256
 
 __device__ zero_order_universe *zeroverse_ptr;
@@ -62,7 +63,8 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	float kmin = 2.0 * (float) M_PI / opts.box_size;
 	float kmax = kmin * (float) (opts.Ngrid / 2);
 	kmax *= SQRT(3);
-	int Nk = opts.Ngrid * SQRT(3) + 1;
+
+	int Nk = opts.Ngrid * SQRT(3) + 2;
 	if (thread == 0) {
 		printf("\nNormalizing Einstein Boltzman solutions to a present day sigma8 of %e\n", opts.sigma8);
 		result_ptr = new float;
@@ -73,8 +75,8 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 		vel_k = new interp_functor<float>;
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
-		integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
-				(float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
+//		integrate<sigma8_integrand, float> <<<1, BLOCK_SIZE>>>(func_ptr,
+//				(float) LOG(0.25 / 32.0 * opts.h), (float) LOG(0.25 * 32.0 * opts.h), result_ptr, (float) 1.0e-6);
 		CUDA_CHECK(cudaGetLastError());
 		CUDA_CHECK(cudaDeviceSynchronize());
 		*result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
@@ -85,8 +87,8 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	if (thread == 0) {
 		printf("Computing start time for non-linear evolution\n");
 	}
-//	float normalization = *result_ptr;
-	float normalization = 6.221450e-09;
+	float normalization = *result_ptr;
+//	float normalization = 6.221450e-09;
 	if (thread == 0) {
 		printf("wave number range %e to %e Mpc^-1 for %i^3 grid and box size of %e Mpc\n", kmin, kmax, opts.Ngrid,
 				opts.box_size);
@@ -143,6 +145,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	 a = zeroverse_ptr->conformal_time_to_scale_factor(tau);
 	 */
 	a = 0.025;
+#ifndef RANDOM_INIT
 	if (thread == 0) {
 		printf(
 				"Computing initial conditions for non-linear evolution to begin at redshift %e with a maximum over/under density of %e\n",
@@ -152,8 +155,10 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin,
 			a);
+#endif
 	__syncthreads();
 	for (int dim = 0; dim < NDIM; dim++) {
+#ifndef RANDOM_INIT
 		if (thread == 0) {
 			printf("Computing %c velocities\n", 'x' + dim);
 		}
@@ -168,11 +173,15 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 				host_parts[l].v[0] = v * a / opts.box_size;
 			}
 		}
+#endif
 		__syncthreads();
 		if (thread == 0) {
 			printf("Computing %c positions\n", 'x' + dim);
 		}
-		float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
+		float xdisp;
+#ifndef RANDOM_INIT
+		xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
+#endif
 		__syncthreads();
 		for (int ij = thread; ij < N * N; ij += block_size) {
 			int i = ij / N;
@@ -181,7 +190,11 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 				const int l = N * (N * i + j) + k;
 				const int I[NDIM] = { i, j, k };
 				float x = (((float) I[dim] + 0.5f) / (float) N);
+#ifdef RANDOM_INIT
+				x += rands[l].real();
+#else
 				x += phi[l].real();
+#endif
 				while (x > 1.0) {
 					x -= 1.0;
 				}

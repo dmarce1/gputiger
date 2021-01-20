@@ -15,11 +15,11 @@
 struct tree;
 
 struct tree_sort_type {
+	array<monopole, NCHILD> poles;
 	array<tree*, NCHILD> tree_ptrs;
 	array<range, NCHILD> boxes;
 	array<particle*, NCHILD> begins;
 	array<particle*, NCHILD> ends;
-	array<monopole, NCHILD> poles;
 };
 
 struct sort_workspace {

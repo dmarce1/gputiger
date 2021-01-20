@@ -14,6 +14,12 @@ template<class T, int N>
 class array {
 	T A[N];
 public:
+	__device__ T* data() {
+		return A;
+	}
+	__device__ const T* data() const {
+		return A;
+	}
 	__device__ T& operator[](int i) {
 		assert(i >= 0);
 		assert(i < N);
@@ -23,6 +29,11 @@ public:
 		assert(i >= 0);
 		assert(i < N);
 		return A[i];
+	}
+	__device__ array(const T* other) {
+		for (int i = 0; i < N; i++) {
+			A[i] = other[i];
+		}
 	}
 	__device__ array<T, N>& operator=(const array<T, N> &other) {
 		for (int i = 0; i < N; i++) {
