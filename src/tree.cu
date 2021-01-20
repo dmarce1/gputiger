@@ -195,17 +195,17 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				CUDA_CHECK(cudaGetLastError());
 			}
 			__syncthreads();
-			if (tid == 0) {
-				CUDA_CHECK(cudaDeviceSynchronize());
-				CUDA_CHECK(cudaFree(childdata));
-			}
-			__syncthreads();
 			if (tid < NCHILD) {
 				float mass = childdata->poles[tid].mass;
 				for (int dim = 0; dim < NDIM; dim++) {
 					poles[dim] = mass * childdata->poles[tid].xcom[dim];
 				}
 				count += childdata->poles[tid].mass;
+			}
+			__syncthreads();
+			if (tid == 0) {
+				CUDA_CHECK(cudaDeviceSynchronize());
+				CUDA_CHECK(cudaFree(childdata));
 			}
 			__syncthreads();
 		}
