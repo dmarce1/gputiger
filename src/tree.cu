@@ -120,8 +120,8 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	__syncthreads();
 //	printf("Sorting at depth %i\n", depth);
 	__syncthreads();
-	auto& poles = workspace->poles[tid];
-	auto& count = workspace->count[tid];
+	auto& poles = workspace->poles[min(tid,WARPSIZE-1)];
+	auto& count = workspace->count[min(tid,WARPSIZE-1)];
 	if (pend - pbegin > opts.parts_per_bucket) {
 		if (tid < NCHILD) {
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -184,7 +184,6 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 				childdata->tree_ptrs[tid] = children[tid];
 				childdata->begins[tid] = workspace->begin[tid];
 				childdata->ends[tid] = workspace->end[tid];
-				auto test = childdata->poles[tid].mass;
 			}
 			__syncthreads();
 			if (tid == 0) {

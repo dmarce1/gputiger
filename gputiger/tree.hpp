@@ -23,14 +23,14 @@ struct tree_sort_type {
 };
 
 struct sort_workspace {
-	particle* begin[NCHILD];
-	particle* end[NCHILD];
+	array<particle*, NCHILD> begin;
+	array<particle*, NCHILD> end;
 	array<range, NCHILD> cranges;
 	int hi;
 	int lo;
-	array<float, NDIM> poles[WARPSIZE];
+	array<array<float, NDIM>,WARPSIZE> poles;
 	tree_sort_type* tree_sort;
-	float count[WARPSIZE];
+	array<float,WARPSIZE> count;
 };
 
 struct tree {
