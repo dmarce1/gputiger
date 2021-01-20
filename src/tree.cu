@@ -422,8 +422,8 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			}
 			__syncthreads();
 		} while (!done);
+		accumulate();
 	}
-	accumulate();
 	__syncthreads();
 	for (int P = KICKWARPSIZE / 2; P >= 1; P /= 2) {
 		if (tid < P) {
