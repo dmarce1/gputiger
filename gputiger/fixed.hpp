@@ -110,6 +110,11 @@ public:
 		return i != other.i;
 	}
 
+	__device__
+	float ewald_dif(fixed other) {
+		return ((int32_t) i - (int32_t) other.i) / norm;
+	}
+
 };
 
 using fixed32 = fixed<uint32_t>;

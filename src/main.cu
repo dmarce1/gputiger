@@ -201,7 +201,6 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 				while (x < 0.0) {
 					x += 1.0;
 				}
-				float test1 = host_parts[l].v[0] / phi[l].real();
 				host_parts[l].x[dim] = x;
 			}
 		}
@@ -302,7 +301,7 @@ int main() {
 	params.omega_b = 0.0240 / (params.h * params.h);
 	params.omega_c = 0.1146 / (params.h * params.h);
 	params.Theta = 1.0;
-	params.Ngrid = 128;
+	params.Ngrid = 256;
 	params.sigma8 = 0.8367;
 	params.max_overden = 1.0;
 	params.box_size = 1000;

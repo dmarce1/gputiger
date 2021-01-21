@@ -302,7 +302,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			float dist2 = 0.f;
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
-				dist = ewald_distance(self_x[dim].to_float() - other_x[dim].to_float());
+				dist = self_x[dim].ewald_dif(other_x[dim]);
 				dist2 += dist * dist;
 			}
 			dist = SQRT(dist2);
@@ -360,10 +360,13 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 						array<float, NDIM> X;
 						{
 							const auto& source_x = others[oi];
-							for (int dim = 0; dim < NDIM; dim++) {
+	/*						for (int dim = 0; dim < NDIM; dim++) {
 								const float x = source_x[dim].to_float() - sink_x[dim].to_float();
 								const float absx = fabs(x);  // 1
 								X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx));  // 5
+							}*/
+							for( int dim = 0; dim < NDIM; dim++) {
+								X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
 							}
 						}
 						{
