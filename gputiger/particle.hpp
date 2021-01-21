@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <gputiger/params.hpp>
 #include <gputiger/array.hpp>
+#include <gputiger/fixed.hpp>
 
 __device__ inline float ewald_distance(float x) {
 	x = abs(x);
@@ -18,7 +19,7 @@ __device__ inline float ewald_distance(float x) {
 	return x;
 }
 struct particle {
-	array<float, NDIM> x;
+	array<fixed32, NDIM> x;
 	array<float, NDIM> v;
 	int8_t rung;
 };

@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                              static tree* tree_base;
+                                                                                                                 static tree* tree_base;
 
 __device__
 static int next_index;
@@ -12,6 +12,9 @@ static int arena_size;
 
 __device__
 static int* leaf_list;
+
+__device__
+static int* tree_list;
 
 __device__
 static int leaf_count;
@@ -94,6 +97,7 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 		int rung) {
 	const int tid = threadIdx.x;
 	//const int block_size = blockDim.x;
+	__shared__ array<array<fixed64, NDIM>, WARPSIZE> poles;
 	if (tid == 0) {
 		if (depth_ >= MAXDEPTH) {
 			printf("Maximum depth exceeded in sort\n");
@@ -159,11 +163,11 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 			__syncthreads();
 			if (tid == 0) {
 				int threadcnt;
-				//		if (depth == opts.max_kernel_depth - 1) {
-				threadcnt = 2 * WARPSIZE;
-				//		} else {
-				//			threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
-				//		}
+				if (depth == opts.max_kernel_depth - 1) {
+					threadcnt = WARPSIZE;
+				} else {
+					threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
+				}
 				tree_sort<<<NCHILD,threadcnt>>>(children.data(), swap_space, depth+1, rung);
 
 				if (tid == 0) {
@@ -174,10 +178,11 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 		}
 		__syncthreads();
 		if (tid == 0) {
-			pole.mass = children[0]->pole.mass + children[1]->pole.mass;
+			pole.count = children[0]->pole.count + children[1]->pole.count;
 			for (int dim = 0; dim < NDIM; dim++) {
-				pole.xcom[dim] = (children[0]->pole.mass * children[0]->pole.xcom[dim]
-						+ children[1]->pole.mass * children[1]->pole.xcom[dim]) / pole.mass;
+				pole.xcom[dim] = (fixed64(children[0]->pole.count) * fixed64(children[0]->pole.xcom[dim])
+						+ fixed64(children[1]->pole.count) * fixed64(children[1]->pole.xcom[dim]))
+						/ fixed64(pole.count);
 			}
 		}
 		__syncthreads();
@@ -189,14 +194,13 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 			leaf_list[index] = this - tree_base;
 		}
 		__syncthreads();
-		__shared__ array<array<float, NDIM>, WARPSIZE> poles;
 		if (tid < WARPSIZE) {
 			for (int dim = 0; dim < NDIM; dim++) {
 				poles[tid][dim] = 0.f;
 			}
 			for (particle* p = part_begin + tid; p < part_end; p += WARPSIZE) {
 				for (int dim = 0; dim < NDIM; dim++) {
-					poles[tid][dim] += p->x[dim];
+					poles[tid][dim] += fixed64(p->x[dim]);
 				}
 			}
 		}
@@ -210,20 +214,22 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 			__syncthreads();
 		}
 		if (tid == 0) {
-			pole.mass = part_end - part_begin;
-			for (int dim = 0; dim < NDIM; dim++) {
-				poles[0][dim] /= pole.mass;
+			pole.count = part_end - part_begin;
+			if (pole.count) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					poles[0][dim] /= fixed64(pole.count);
+				}
+				for (int dim = 0; dim < NDIM; dim++) {
+					pole.xcom[dim] = fixed32(poles[0][dim]);
+				}
+			} else {
+				for (int dim = 0; dim < NDIM; dim++) {
+					pole.xcom[dim] = 0.f;
+				}
 			}
-			pole.xcom = poles[0];
 		}
+		__syncthreads();
 	}
-	assert(abs(pole.xcom[0]) <= 1.0);
-	assert(abs(pole.xcom[1]) <= 1.0);
-	assert(abs(pole.xcom[2]) <= 1.0);
-	assert(abs(pole.xcom[0]) >= 0.0);
-	assert(abs(pole.xcom[1]) >= 0.0);
-	assert(abs(pole.xcom[2]) >= 0.0);
-//	printf( "%e %e %e \n", pole.xcom[0], pole.xcom[1], pole.xcom[2]);
 	return pole;
 }
 
@@ -246,11 +252,11 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	__shared__ float h2;
 	bool opened;
 	__shared__ array<array<float, NDIM>, PARTMAX> F;
-	__shared__ array<array<float, NDIM>, OTHERSMAX> others1;
-	__shared__ array<array<float, NDIM>, OTHERSMAX> others2;
+	__shared__ array<array<fixed32, NDIM>, OTHERSMAX> others1;
+	__shared__ array<array<fixed32, NDIM>, OTHERSMAX> others2;
 	__shared__ bool swtch;
-	__shared__ array<float, NDIM>* others;
-	__shared__ array<float, NDIM>* next_others;
+	__shared__ array<fixed32, NDIM>* others;
+	__shared__ array<fixed32, NDIM>* next_others;
 	__shared__ int other_cnt;
 	if (tid == 0) {
 		swtch = false;
@@ -284,10 +290,10 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			self_w += POW(self.box.end[dim] - self.box.begin[dim], 2);
 		}
 		self_w = SQRT(self_w) / float(2);
-		array<float, NDIM> self_x = self.pole.xcom;
+		array<fixed32, NDIM> self_x = self.pole.xcom;
 		do {
 			const auto& other = *pointers[depth];
-			array<float, NDIM> other_x = other.pole.xcom;
+			array<fixed32, NDIM> other_x = other.pole.xcom;
 			float other_w = 0.0f;
 			for (int dim = 0; dim < NDIM; dim++) {
 				other_w += pow2(other.box.end[dim] - other.box.begin[dim]);
@@ -296,7 +302,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 			float dist2 = 0.f;
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
-				dist = ewald_distance(self_x[dim] - other_x[dim]);
+				dist = ewald_distance(self_x[dim].to_float() - other_x[dim].to_float());
 				dist2 += dist * dist;
 			}
 			dist = SQRT(dist2);
@@ -355,7 +361,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 						{
 							const auto& source_x = others[oi];
 							for (int dim = 0; dim < NDIM; dim++) {
-								const float x = source_x[dim] - sink_x[dim];
+								const float x = source_x[dim].to_float() - sink_x[dim].to_float();
 								const float absx = fabs(x);  // 1
 								X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx));  // 5
 							}

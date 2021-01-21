@@ -6,7 +6,7 @@
 #include <gputiger/particle.hpp>
 
 struct monopole {
-	float mass;
-	array<float,NDIM> xcom;
+	int count;
+	array<fixed32,NDIM> xcom;
 };
 
