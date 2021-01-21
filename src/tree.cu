@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                     static tree* tree_base;
+                                                                                                              static tree* tree_base;
 
 __device__
 static int next_index;
@@ -38,59 +38,60 @@ __device__ tree* tree::alloc() {
 	return tree_base + index;
 }
 
-__device__ particle* sort_parts(int* lo, int* hi, particle* swap, particle* b, particle* e, float xmid, int dim) {
+__device__ particle* sort_parts(particle* swap, particle* b, particle* e, float xmid, int dim) {
 	const int& tid = threadIdx.x;
 	const int& block_size = blockDim.x;
+	__shared__ int lo;
+	__shared__ int hi;
 	if (e == b) {
 		return e;
 	} else {
 		if (tid == 0) {
-			*lo = 0;
-			*hi = (e - b) - 1;
+			lo = 0;
+			hi = (e - b) - 1;
 		}
 		__syncthreads();
 		int index;
 		for (particle* part = b + tid; part < e; part += block_size) {
 			if (part->x[dim] > xmid) {
-				index = atomicSub(hi, 1);
+				index = atomicSub(&hi, 1);
 			} else {
-				index = atomicAdd(lo, 1);
+				index = atomicAdd(&lo, 1);
 			}
 			swap[index] = *part;
 		}
 		__syncthreads();
 		for (index = tid; index < (e - b); index += block_size) {
+			assert(index < (e - b));
 			b[index] = swap[index];
 		}
 		__syncthreads();
-		return b + *lo;
+		return b + lo;
 	}
 }
 
 __global__
 void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range box, int rung) {
-	__shared__ sort_workspace spaces[MAXDEPTH];
-	root->sort(spaces, swap_space, pbegin, pend, box, 0, rung);
+	root->sort(swap_space, pbegin, pend, box, 0, rung);
 }
 
 __global__
-void tree_sort(tree_sort_type* trees, particle* swap_space, int depth, int rung) {
-	__shared__ sort_workspace spaces[MAXDEPTH];
+void tree_sort(tree** children, particle* swap_space, int depth, int rung) {
 	const int& bid = blockIdx.x;
-	particle* base = trees->begins[0];
-	particle* b = trees->begins[bid];
-	particle* e = trees->ends[bid];
+	particle* base = children[0]->part_begin;
+	particle* b = children[bid]->part_begin;
+	particle* e = children[bid]->part_end;
 	particle* this_swap = swap_space + (b - base);
-	range box = trees->boxes[bid];
-	const auto tmp = trees->tree_ptrs[bid]->sort(spaces, this_swap, b, e, box, depth, rung);
-	if( threadIdx.x == 0 ) {
-		trees->poles[bid] = tmp;
+	range box = children[bid]->box;
+	const auto tmp = children[bid]->sort(this_swap, b, e, box, depth, rung);
+	if (threadIdx.x == 0) {
+		children[bid]->pole = tmp;
 	}
 	__syncthreads();
 }
 
-__device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, particle* pbegin, particle* pend,
-		range box_, int depth_, int rung) {
+__device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle* pend, range box_, int depth_,
+		int rung) {
 	const int tid = threadIdx.x;
 	//const int block_size = blockDim.x;
 	if (tid == 0) {
@@ -107,7 +108,7 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	float midx;
 	particle* mid;
 	__syncthreads();
-	/*	for (auto* ptr = part_begin + tid; ptr < part_end; ptr+=blockDim.x) {
+	/*	for (auto* ptr = part_begin + tid; ptr < part_end; ptr += blockDim.x) {
 	 if (!box.in_range(ptr->x)) {
 	 printf("Particle out of range at depth %i\n", depth);
 	 for (int dim = 0; dim < NDIM; dim++) {
@@ -116,18 +117,15 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 	 printf("\n");
 	 //				__trap();
 	 }
-	 }*/
-	__syncthreads();
-//	printf("Sorting at depth %i\n", depth);
-	__syncthreads();
-	auto& poles = workspace->poles[min(tid,WARPSIZE-1)];
-	auto& count = workspace->count[min(tid,WARPSIZE-1)];
+	 }
+	 //	printf("Sorting at depth %i\n", depth);
+	 __syncthreads();
+	 */
 	if (pend - pbegin > opts.parts_per_bucket) {
-		if (tid < NCHILD) {
-			for (int dim = 0; dim < NDIM; dim++) {
-				poles[dim] = 0;
+		if (tid == 0) {
+			for (int ci = 0; ci < NCHILD; ci++) {
+				children[ci] = alloc();
 			}
-			count = float(0);
 		}
 		__syncthreads();
 		float max_span = 0.0;
@@ -139,99 +137,51 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			}
 		}
 		midx = (box.begin[long_dim] / float(2) + box.end[long_dim] / float(2));
-		mid = sort_parts(&workspace->lo, &workspace->hi, swap_space, pbegin, pend, midx, long_dim);
+		mid = sort_parts(swap_space, pbegin, pend, midx, long_dim);
 		if (tid == 0) {
-			workspace->cranges[0] = box;
-			workspace->cranges[1] = box;
-			workspace->cranges[0].end[long_dim] = midx;
-			workspace->cranges[1].begin[long_dim] = midx;
-			workspace->begin[0] = pbegin;
-			workspace->end[0] = workspace->begin[1] = mid;
-			workspace->end[1] = pend;
-
-		}
-		__syncthreads();
-		if (tid == 0) {
-			for (int ci = 0; ci < NCHILD; ci++) {
-				children[ci] = alloc();
-			}
+			children[0]->box = box;
+			children[1]->box = box;
+			children[0]->box.end[long_dim] = midx;
+			children[1]->box.begin[long_dim] = midx;
+			children[0]->part_begin = part_begin;
+			children[1]->part_end = part_end;
+			children[0]->part_end = children[1]->part_begin = mid;
 		}
 		__syncthreads();
 		if (depth >= opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {
-				particle* swap_base = swap_space + (workspace->begin[ci] - workspace->begin[0]);
-				monopole this_pole = children[ci]->sort(workspace + 1, swap_base, workspace->begin[ci],
-						workspace->end[ci], workspace->cranges[ci], depth + 1, rung);
-				__syncthreads();
-				if (tid == 0) {
-					workspace->count[ci] = this_pole.mass;
-				}
-				if (tid < NDIM) {
-					workspace->poles[ci][tid] = this_pole.mass * this_pole.xcom[tid];
-				}
-				__syncthreads();
+				particle* swap_base = swap_space + (children[ci]->part_begin - children[0]->part_begin);
+				monopole this_pole = children[ci]->sort(swap_base, children[ci]->part_begin, children[ci]->part_end,
+						children[ci]->box, depth + 1, rung);
 			}
 			__syncthreads();
 		} else {
-			tree_sort_type* &childdata = workspace->tree_sort;
-
-			if (tid == 0) {
-				CUDA_MALLOC(&childdata, sizeof(tree_sort_type));
-			}
-			__syncthreads();
-			if (tid < NCHILD) {
-				childdata->boxes[tid] = workspace->cranges[tid];
-				childdata->tree_ptrs[tid] = children[tid];
-				childdata->begins[tid] = workspace->begin[tid];
-				childdata->ends[tid] = workspace->end[tid];
-			}
 			__syncthreads();
 			if (tid == 0) {
 				int threadcnt;
-		//		if (depth == opts.max_kernel_depth - 1) {
-					threadcnt = 2*WARPSIZE;
-		//		} else {
-		//			threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
-		//		}
-				tree_sort<<<NCHILD,threadcnt>>>(childdata, swap_space, depth+1, rung);
-			}
-			__syncthreads();
-			if (tid == 0) {
-				CUDA_CHECK(cudaGetLastError());
-				CUDA_CHECK(cudaDeviceSynchronize());
-			}
-			__syncthreads();
-			if (tid < NCHILD) {
-				float mass = childdata->poles[tid].mass;
-				for (int dim = 0; dim < NDIM; dim++) {
-					poles[dim] = mass * childdata->poles[tid].xcom[dim];
+				//		if (depth == opts.max_kernel_depth - 1) {
+				threadcnt = 2 * WARPSIZE;
+				//		} else {
+				//			threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
+				//		}
+				tree_sort<<<NCHILD,threadcnt>>>(children.data(), swap_space, depth+1, rung);
+
+				if (tid == 0) {
+					CUDA_CHECK(cudaGetLastError());
+					CUDA_CHECK(cudaDeviceSynchronize());
 				}
-				count += childdata->poles[tid].mass;
 			}
-			__syncthreads();
-			if (tid == 0) {
-				CUDA_CHECK(cudaFree(childdata));
-			}
-			__syncthreads();
 		}
 		__syncthreads();
-		for (int P = NCHILD / 2; P >= 1; P /= 2) {
-			if (tid < P) {
-				for (int dim = 0; dim < NDIM; dim++) {
-					poles[dim] += workspace->poles[tid + P][dim];
-				}
-				count += workspace->count[tid + P];
-			}
-			__syncthreads();
-		}
-
-	} else {
-		if (tid < WARPSIZE) {
+		if (tid == 0) {
+			pole.mass = children[0]->pole.mass + children[1]->pole.mass;
 			for (int dim = 0; dim < NDIM; dim++) {
-				poles[dim] = 0.f;
+				pole.xcom[dim] = (children[0]->pole.mass * children[0]->pole.xcom[dim]
+						+ children[1]->pole.mass * children[1]->pole.xcom[dim]) / pole.mass;
 			}
-			count = 0.f;
 		}
+		__syncthreads();
+	} else {
 		__syncthreads();
 		if (tid == 0) {
 			leaf = true;
@@ -239,45 +189,41 @@ __device__ monopole tree::sort(sort_workspace* workspace, particle* swap_space, 
 			leaf_list[index] = this - tree_base;
 		}
 		__syncthreads();
+		__shared__ array<array<float, NDIM>, WARPSIZE> poles;
 		if (tid < WARPSIZE) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				poles[tid][dim] = 0.f;
+			}
 			for (particle* p = part_begin + tid; p < part_end; p += WARPSIZE) {
 				for (int dim = 0; dim < NDIM; dim++) {
-					poles[dim] += p->x[dim];
+					poles[tid][dim] += p->x[dim];
 				}
-				count += 1.f;
 			}
 		}
 		__syncthreads();
 		for (int P = WARPSIZE / 2; P >= 1; P /= 2) {
 			if (tid < P) {
 				for (int dim = 0; dim < NDIM; dim++) {
-					poles[dim] += workspace->poles[tid + P][dim];
+					poles[tid][dim] += poles[tid + P][dim];
 				}
-				count += workspace->count[tid + P];
 			}
 			__syncthreads();
 		}
-	}
-	__syncthreads();
-	if (tid == 0) {
-		pole.mass = count;
-
-	}
-	__syncthreads();
-	if (tid < NDIM) {
-		if (pole.mass != float(0)) {
-			pole.xcom[tid] = workspace->poles[0][tid] / pole.mass;
-		} else {
-			pole.xcom[tid] = float(0);
+		if (tid == 0) {
+			pole.mass = part_end - part_begin;
+			for (int dim = 0; dim < NDIM; dim++) {
+				poles[0][dim] /= pole.mass;
+			}
+			pole.xcom = poles[0];
 		}
 	}
-	__syncthreads();
 	assert(abs(pole.xcom[0]) <= 1.0);
 	assert(abs(pole.xcom[1]) <= 1.0);
 	assert(abs(pole.xcom[2]) <= 1.0);
 	assert(abs(pole.xcom[0]) >= 0.0);
 	assert(abs(pole.xcom[1]) >= 0.0);
 	assert(abs(pole.xcom[2]) >= 0.0);
+//	printf( "%e %e %e \n", pole.xcom[0], pole.xcom[1], pole.xcom[2]);
 	return pole;
 }
 

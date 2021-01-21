@@ -13,7 +13,7 @@
 #include <gputiger/monopole.hpp>
 
 struct tree;
-
+/*
 struct tree_sort_type {
 	array<monopole, NCHILD> poles;
 	array<tree*, NCHILD> tree_ptrs;
@@ -32,7 +32,7 @@ struct sort_workspace {
 	tree_sort_type* tree_sort;
 	array<float,WARPSIZE> count;
 };
-
+*/
 struct tree {
 	array<tree*, NCHILD> children;
 	range box;
@@ -47,7 +47,7 @@ struct tree {
 	__device__
 	  static tree* alloc();
 	__device__
-	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range,  int depth, int rung);
+	monopole sort(particle* swap_space, particle* pbegin, particle* pend, range,  int depth, int rung);
 	__device__
 	void kick(tree* root, int rung, float dt);
 
