@@ -28,9 +28,9 @@ struct sort_workspace {
 	array<range, NCHILD> cranges;
 	int hi;
 	int lo;
-	array<array<float, NDIM>,WARPSIZE> poles;
-	tree_sort_type* tree_sort;
-	array<float,WARPSIZE> count;
+	array<array<float, NDIM>, WARPSIZE> poles;
+	tree_sort_type tree_sort;
+	array<float, WARPSIZE> count;
 };
 
 struct tree {
@@ -45,16 +45,15 @@ struct tree {
 	__device__
 	static void initialize(particle* parts, void* arena, size_t bytes);
 	__device__
-	  static tree* alloc();
-	__device__
-	monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range,  int depth, int rung);
+	   static tree* alloc();
+	__device__ monopole sort(sort_workspace*, particle* swap_space, particle* pbegin, particle* pend, range, int depth,
+			int rung);
 	__device__
 	void kick(tree* root, int rung, float dt);
 
 };
 
-
 __global__
-void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range box, int rung);
+void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range box, int rung);
 
 #endif /* TREE_HPP_ */

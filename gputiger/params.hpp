@@ -28,7 +28,7 @@
 		printf( "cudaMalloc failed on %i in %s with \"%s\"\n", __LINE__, __FILE__, cudaGetErrorString(rc)); \
 		__trap(); \
 	} else { \
-		if( a == nullptr ) { \
+		if( *a == nullptr ) { \
 			printf( "Failed to allocate memory on %i in %s\n", __LINE__, __FILE__); \
 			__trap(); \
 		} \
