@@ -51,7 +51,7 @@ int main() {
 	}
 
 	options opts;
-	opts.redshift = 50.0;
+	opts.redshift = 20.0;
 	opts.h = 0.697;
 	opts.Neff = 3.84;
 	opts.Y = 0.24;
@@ -61,7 +61,7 @@ int main() {
 	opts.Ngrid = 256;
 	opts.sigma8 = 0.8367;
 	opts.max_overden = 1.0;
-	opts.box_size = 1000;
+	opts.box_size = 1000;//613.0 *opts.Ngrid/2160.0;
 	//	opts.box_size = 613.0 / 2160.0 * opts.Ngrid;
 	opts.nout = 64;
 	opts.max_kernel_depth = KERNEL_DEPTH - 1;
@@ -121,6 +121,8 @@ int main() {
 	CUDA_MALLOC_MANAGED(&arena, arena_size);
 	initialize<<<1, WARPSIZE>>>(arena, parts_ptr, opts, host_ewald);
 	CUDA_CHECK(cudaDeviceSynchronize());
+
+
 	/*	 size_t stack_size;
 	 size_t desired_stack_size = 4 * 1024;
 	 size_t rlimit = KERNEL_DEPTH + 1;

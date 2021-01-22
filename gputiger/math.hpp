@@ -194,7 +194,7 @@ __device__ inline float pow2(float r) {
 	return r * r;
 }
 
-__device__
+__global__
 void generate_random_normals(cmplx* nums, int N);
 
 #endif /* GPUTIGER_MATH_HPP_ */

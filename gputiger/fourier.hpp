@@ -12,7 +12,8 @@
 #include <gputiger/math.hpp>
 
 
-__device__ void fft_basis(cmplx* X, int N);
+__global__
+void fft_basis(cmplx* X, int N);
 
 
 __device__

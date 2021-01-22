@@ -26,7 +26,7 @@ double find_root(nvstd::function<double(double)> f) {
 	return x;
 }
 
-__device__
+__global__
 void generate_random_normals(cmplx* nums, int N) {
 	uint64_t mod = 1LL << 31LL;
 	uint64_t a1 = 1664525LL;

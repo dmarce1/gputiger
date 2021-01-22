@@ -21,6 +21,8 @@
 
 #define CUDA_CHECK( a ) if( a != cudaSuccess ) printf( "CUDA error on line %i of %s : %s\n", __LINE__, __FILE__, cudaGetErrorString(a))
 
+#define CHECK_PTR( a ) if( a == nullptr) printf( "Not able to allocate memory near line %i in file %s\n", __LINE__, __FILE__);
+
 #define CUDA_MALLOC( a, b ) \
 { \
 	auto rc = cudaMalloc(a,b); \

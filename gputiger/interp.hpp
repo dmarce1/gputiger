@@ -59,6 +59,27 @@ void build_interpolation_function(interp_functor<T>* f, const vector<T>& values,
 }
 
 
+
+template<class T>
+__device__
+void build_interpolation_function(interp_functor<T>* f, T* values, T amin, T amax, int N) {
+	T minloga = log(amin);
+	T maxloga = log(amax);
+	T dloga = (maxloga - minloga) / N;
+	interp_functor<T> functor;
+	functor.values.resize(N);
+	for( int i = 0; i < N; i++) {
+		functor.values[i] = values[i];
+	}
+	functor.maxloga = maxloga;
+	functor.minloga = minloga;
+	functor.dloga = dloga;
+	functor.amin = amin;
+	functor.amax = amax;
+	functor.N = N;
+	*f = functor;
+}
+
 #include <gputiger/params.hpp>
 
 

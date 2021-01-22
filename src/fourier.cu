@@ -1,6 +1,7 @@
 #include <gputiger/fourier.hpp>
 
-__device__ void fft_basis(cmplx* X, int N) {
+__global__
+void fft_basis(cmplx* X, int N) {
 	const int& thread = threadIdx.x;
 	const int& block_size = blockDim.x;
 	for (int i = thread; i < N / 2; i += block_size) {

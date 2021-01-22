@@ -56,8 +56,8 @@ struct sigma8_integrand {
 __device__ void einstein_boltzmann_init_set(cos_state* U, zero_order_universe* uni, float kmin, float kmax, int N,
 		float amin, float normalization);
 
-__device__ void einstein_boltzmann_interpolation_function(interp_functor<float>* den_k_func,
-		interp_functor<float>* vel_k_func, cos_state* U, zero_order_universe* uni, float kmin, float kmax, int N,
+__global__ void einstein_boltzmann_interpolation_function(interp_functor<float>* den_k_func,
+		interp_functor<float>* vel_k_func, cos_state* U, zero_order_universe* uni, float kmin, float kmax, float norm, int N,
 		float astart, float astop);
 
 #endif /* GPUTIGER_BOLTZMANN_HPP_ */
