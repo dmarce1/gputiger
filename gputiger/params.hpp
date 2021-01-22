@@ -12,7 +12,7 @@
 #include <cstdio>
 
 
-#define TREESPACE 2
+#define TREESPACE 3
 #define NDIM 3
 #define NCHILD 2
 #define MAXDEPTH 30
@@ -37,6 +37,8 @@
 
 
 struct options {
+	float G;
+	float particle_mass;
 	float hsoft;
 	float max_overden;
 	float h;

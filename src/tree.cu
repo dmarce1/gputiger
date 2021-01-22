@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                               static tree* tree_base;
+                                                                                                                                      static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,10 +20,10 @@ __device__
 static int leaf_count;
 
 __device__
-            static ewald_table_t* etable;
+                   static ewald_table_t* etable;
 
 __device__
-       static cudaTextureObject_t* tex_ewald;
+              static cudaTextureObject_t* tex_ewald;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes, ewald_table_t* etable_) {
@@ -207,7 +207,7 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 			corner[1] = box.begin[1];
 			corner[2] = box.begin[2];
 			for (int dim = 0; dim < NDIM; dim++) {
-				r1 += pow2(pole.xcom[dim].to_double()- corner[dim]);
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
 			}
 			r2 = max(r1, r2);
 			r1 = 0.0;
@@ -215,7 +215,7 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 			corner[1] = box.begin[1];
 			corner[2] = box.begin[2];
 			for (int dim = 0; dim < NDIM; dim++) {
-				r1 += pow2(pole.xcom[dim].to_double()- corner[dim]);
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
 			}
 			r2 = max(r1, r2);
 			r1 = 0.0;
@@ -460,27 +460,24 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 					atomicAdd(flops, double(42 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX)));
 				}
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
-					const auto& sink_x = sink->x;
-					const int count = min(other_cnt, OTHERSMAX);
-					for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
-						array<float, NDIM> X;
-						{
-							const auto& source_x = others[oi];
-							/*						for (int dim = 0; dim < NDIM; dim++) {
-							 const float x = source_x[dim].to_float() - sink_x[dim].to_float();
-							 const float absx = fabs(x);  // 1
-							 X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx));  // 5
-							 }*/
-							for (int dim = 0; dim < NDIM; dim++) {
-								X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
+					if (sink->rung >= rung) {
+						const auto& sink_x = sink->x;
+						const int count = min(other_cnt, OTHERSMAX);
+						for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
+							array<float, NDIM> X;
+							{
+								const auto& source_x = others[oi];
+								for (int dim = 0; dim < NDIM; dim++) {
+									X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
+								}
 							}
-						}
-						{
-							float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2], h2));
-							Xinv3 = Xinv3 * Xinv3 * Xinv3;
-							const int index = sink - self.part_begin;
-							for (int dim = 0; dim < NDIM; dim++) {
-								F[index][dim] += X[dim] * Xinv3; // 2
+							{
+								float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2], h2));
+								Xinv3 = Xinv3 * Xinv3 * Xinv3;
+								const int index = sink - self.part_begin;
+								for (int dim = 0; dim < NDIM; dim++) {
+									F[index][dim] += X[dim] * Xinv3; // 2
+								}
 							}
 						}
 					}
@@ -500,6 +497,12 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				__syncthreads();
 			}
 		} while (!done);
+		const float GM = opts.particle_mass * opts.G;
+		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+			}
+		}
 	}
 }
 
@@ -612,24 +615,26 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 					atomicAdd(flops, double(128 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX2)));
 				}
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
-					const auto& sink_x = sink->x;
-					const int count = min(other_cnt, OTHERSMAX2);
-					for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
-						array<float, NDIM> X;
-						array<float, NDIM> absX;
-						const auto& source_x = others[oi];
-						for (int dim = 0; dim < NDIM; dim++) {
-							X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
-							absX[dim] = abs(X[dim]);
-							const int index = sink - self.part_begin;
-							const float x0 = absX[0] * dewald + 0.5;
-							const float y0 = absX[1] * dewald + 0.5;
-							const float z0 = absX[2] * dewald + 0.5;
+					if (sink->rung >= rung) {
+						const auto& sink_x = sink->x;
+						const int count = min(other_cnt, OTHERSMAX2);
+						for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
+							array<float, NDIM> X;
+							array<float, NDIM> absX;
+							const auto& source_x = others[oi];
 							for (int dim = 0; dim < NDIM; dim++) {
-								float tmp = tex3D<float>(tex_ewald[dim], x0, y0, z0);
-								F[index][dim] += tmp;
-							}
+								X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
+								absX[dim] = abs(X[dim]);
+								const int index = sink - self.part_begin;
+								const float x0 = absX[0] * dewald + 0.5;
+								const float y0 = absX[1] * dewald + 0.5;
+								const float z0 = absX[2] * dewald + 0.5;
+								for (int dim = 0; dim < NDIM; dim++) {
+									float tmp = tex3D<float>(tex_ewald[dim], x0, y0, z0);
+									F[index][dim] += tmp;
+								}
 
+							}
 						}
 					}
 				}
@@ -648,6 +653,12 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 				__syncthreads();
 			}
 		} while (!done);
+		const float GM = opts.particle_mass * opts.G;
+		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+			}
+		}
 	}
 }
 
