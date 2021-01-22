@@ -12,7 +12,7 @@
 #include <cstdio>
 
 
-#define TREESPACE 1
+#define TREESPACE 2
 #define NDIM 3
 #define NCHILD 2
 #define MAXDEPTH 30

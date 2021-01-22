@@ -308,7 +308,7 @@ int main() {
 	//	params.box_size = 613.0 / 2160.0 * params.Ngrid;
 	params.nout = 64;
 	params.max_kernel_depth =  6;
-	params.parts_per_bucket = 128;
+	params.parts_per_bucket = 64;
 	params.opening_crit = 0.7;
 	params.nparts = params.Ngrid * params.Ngrid * params.Ngrid;
 	params.hsoft = params.Ngrid / 50.0;
