@@ -100,7 +100,7 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		printf("\tComputing zero order Universe\n");
 		create_zero_order_universe(zeroverse_ptr, 1.0);
 
-		printf("\tNormalizing Eintein-Boltzmann solutions\n");
+		printf("\tNormalizing Einstein-Boltzmann solutions\n");
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
 		integrate<sigma8_integrand, float> <<<1, SIGMA8SIZE>>>(func_ptr,
@@ -150,6 +150,7 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 
 		printf("\tTransferring data back from host\n");
 		transfer_data<<<1,TRANSFERSIZE>>>(parts,host_parts);
+		CUDA_CHECK(cudaDeviceSynchronize());
 		printf("Initialization complete\n");
 
 		CUDA_CHECK(cudaFree(zeroverse_ptr));
