@@ -32,5 +32,19 @@ struct range {
 		}
 		return rc;
 	}
+	template<class V>
+	__device__
+	bool in_range(array<fixed<V>, NDIM> v) {
+		bool rc = true;
+		if (threadIdx.x == 0) {
+			for (int dim = 0; dim < NDIM; dim++) {
+				if (v[dim].to_float() < begin[dim] || v[dim].to_float() > end[dim]) {
+					rc = false;
+					break;
+				}
+			}
+		}
+		return rc;
+	}
 
 };

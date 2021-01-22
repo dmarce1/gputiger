@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                 static tree* tree_base;
+                                                                                                                   static tree* tree_base;
 
 __device__
 static int next_index;
@@ -113,7 +113,7 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 	particle* mid;
 	__syncthreads();
 	/*	for (auto* ptr = part_begin + tid; ptr < part_end; ptr += blockDim.x) {
-	 if (!box.in_range(ptr->x)) {
+	 if (!box.in_range(ptr->x.to_float())) {
 	 printf("Particle out of range at depth %i\n", depth);
 	 for (int dim = 0; dim < NDIM; dim++) {
 	 printf("%e %e %e\n", box.begin[dim], box.end[dim], ptr->x[dim]);
@@ -121,10 +121,10 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 	 printf("\n");
 	 //				__trap();
 	 }
-	 }
-	 //	printf("Sorting at depth %i\n", depth);
-	 __syncthreads();
-	 */
+	 }*/
+	//	printf("Sorting at depth %i\n", depth);
+	__syncthreads();
+
 	if (pend - pbegin > opts.parts_per_bucket) {
 		if (tid == 0) {
 			for (int ci = 0; ci < NCHILD; ci++) {
@@ -180,9 +180,12 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 		if (tid == 0) {
 			pole.count = children[0]->pole.count + children[1]->pole.count;
 			for (int dim = 0; dim < NDIM; dim++) {
-				pole.xcom[dim] = (fixed64(children[0]->pole.count) * fixed64(children[0]->pole.xcom[dim])
-						+ fixed64(children[1]->pole.count) * fixed64(children[1]->pole.xcom[dim]))
-						/ fixed64(pole.count);
+				auto p0 = (children[0]->pole.count) * (children[0]->pole.xcom[dim].to_float());
+				auto p1 = (children[1]->pole.count) * (children[1]->pole.xcom[dim].to_float());
+				p0 += p1;
+				p0 /= pole.count;
+				pole.xcom[dim] = p0;
+//				printf( "%e\n", p0.to_float());
 			}
 		}
 		__syncthreads();
@@ -230,6 +233,8 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 		}
 		__syncthreads();
 	}
+//	if (tid == 0 && !leaf)
+//		printf("%e\n", pole.xcom[0].to_float());
 	return pole;
 }
 
@@ -360,12 +365,12 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 						array<float, NDIM> X;
 						{
 							const auto& source_x = others[oi];
-	/*						for (int dim = 0; dim < NDIM; dim++) {
-								const float x = source_x[dim].to_float() - sink_x[dim].to_float();
-								const float absx = fabs(x);  // 1
-								X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx));  // 5
-							}*/
-							for( int dim = 0; dim < NDIM; dim++) {
+							/*						for (int dim = 0; dim < NDIM; dim++) {
+							 const float x = source_x[dim].to_float() - sink_x[dim].to_float();
+							 const float absx = fabs(x);  // 1
+							 X[dim] = copysignf(fminf(absx, 1.f - absx), x * (0.5f - absx));  // 5
+							 }*/
+							for (int dim = 0; dim < NDIM; dim++) {
 								X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
 							}
 						}

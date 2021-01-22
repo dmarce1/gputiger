@@ -22,6 +22,7 @@ public:
 	template<class V>
 	__device__   inline fixed& operator=(const fixed<V>& other) {
 		i = other.i;
+		return *this;
 	}
 
 	__device__   inline fixed& operator+=(const fixed& other) {
