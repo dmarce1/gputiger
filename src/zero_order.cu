@@ -96,8 +96,6 @@ __device__
 void create_zero_order_universe(zero_order_universe* uni_ptr, double amax) {
 	zero_order_universe& uni = *uni_ptr;
 	;
-	printf("Creating zero order Universe\n");
-	printf("Parameters:\n");
 	using namespace constants;
 	double omega_b = opts.omega_b;
 	double omega_c = opts.omega_c;
@@ -117,16 +115,17 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, double amax) {
 	vector<float> thomson(N + 1);
 	vector<float> sound_speed2(N + 1);
 
-	printf("\t h                 = %f\n", littleh);
-	printf("\t omega_m           = %f\n", omega_m);
-	printf("\t omega_r           = %f\n", omega_r);
-	printf("\t omega_lambda      = %f\n", 1 - omega_r - omega_m);
-	printf("\t omega_b           = %f\n", omega_b);
-	printf("\t omega_c           = %f\n", omega_c);
-	printf("\t omega_gam         = %f\n", omega_gam);
-	printf("\t omega_nu          = %f\n", omega_nu);
-	printf("\t Neff              = %f\n", Neff);
-	printf("\t temperature today = %f\n\n", 2.73 * Theta);
+	printf("\t\tParameters:\n");
+	printf("\t\t\t h                 = %f\n", littleh);
+	printf("\t\t\t omega_m           = %f\n", omega_m);
+	printf("\t\t\t omega_r           = %f\n", omega_r);
+	printf("\t\t\t omega_lambda      = %f\n", 1 - omega_r - omega_m);
+	printf("\t\t\t omega_b           = %f\n", omega_b);
+	printf("\t\t\t omega_c           = %f\n", omega_c);
+	printf("\t\t\t omega_gam         = %f\n", omega_gam);
+	printf("\t\t\t omega_nu          = %f\n", omega_nu);
+	printf("\t\t\t Neff              = %f\n", Neff);
+	printf("\t\t\t temperature today = %f\n\n", 2.73 * Theta);
 
 	dloga = (logamax - logamin) / N;
 	const auto cosmic_hubble =
@@ -237,12 +236,12 @@ void create_zero_order_universe(zero_order_universe* uni_ptr, double amax) {
 		}
 		sound_speed2[i - 1] = cs2 / (c * c);
 		thomson[i] = sigmaT;
-		printf("%e %e %e %e\n", a, (nHp + nHep + 2 * nHepp) / (nH + nHp + 2 * (nHe + nHep + nHepp)), thomson[i],
-				sqrt(sound_speed2[i - 1]));
+//		printf("%e %e %e %e\n", a, (nHp + nHep + 2 * nHepp) / (nH + nHp + 2 * (nHe + nHep + nHepp)), thomson[i],
+///				sqrt(sound_speed2[i - 1]));
 	}
 	cs2 = (P - P1) / (rho_b - rho1);
 	sound_speed2[N - 1] = cs2 / c;
-	print_time(t);
+//	print_time(t);
 	uni.amin = amin;
 	uni.amax = amax;
 	build_interpolation_function(&uni.sigma_T, thomson, (float) amin, (float) amax);

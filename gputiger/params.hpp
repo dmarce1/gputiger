@@ -35,8 +35,41 @@
 	} \
 }
 
+#ifdef __CUDA_ARCH__
+
+#define CUDA_MALLOC_MANAGED( a, b ) \
+{ \
+	auto rc = cudaMallocManaged(a,b); \
+	if( rc != cudaSuccess ) { \
+		printf( "cudaMalloc failed on %i in %s with \"%s\"\n", __LINE__, __FILE__, cudaGetErrorString(rc)); \
+		__trap(); \
+	} else { \
+		if( a == nullptr ) { \
+			printf( "Failed to allocate memory on %i in %s\n", __LINE__, __FILE__); \
+			__trap(); \
+		} \
+	} \
+}
+#else
+
+#define CUDA_MALLOC_MANAGED( a, b ) \
+{ \
+	auto rc = cudaMallocManaged(a,b); \
+	if( rc != cudaSuccess ) { \
+		printf( "cudaMalloc failed on %i in %s with \"%s\"\n", __LINE__, __FILE__, cudaGetErrorString(rc)); \
+		abort(); \
+	} else { \
+		if( a == nullptr ) { \
+			printf( "Failed to allocate memory on %i in %s\n", __LINE__, __FILE__); \
+			abort(); \
+		} \
+	} \
+}
+#endif
+
 
 struct options {
+	float redshift;
 	float G;
 	float particle_mass;
 	float hsoft;
