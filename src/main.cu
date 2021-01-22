@@ -119,7 +119,7 @@ int main() {
 	size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
 	CUDA_MALLOC_MANAGED(&parts_ptr, sizeof(particle) * N3);
 	CUDA_MALLOC_MANAGED(&arena, arena_size);
-	initialize<<<1, WARPSIZE>>>(arena, parts_ptr, opts, host_ewald);
+	initialize<<<1, 1>>>(arena, parts_ptr, opts, host_ewald);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
 

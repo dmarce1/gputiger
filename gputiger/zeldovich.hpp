@@ -8,18 +8,18 @@
 #ifndef ZELDOVICH_HPP_
 #define ZELDOVICH_HPP_
 
+
 #include <gputiger/params.hpp>
 #include <gputiger/vector.hpp>
 #include <gputiger/interp.hpp>
 #include <gputiger/math.hpp>
 #include <gputiger/fourier.hpp>
 
-__device__ float zeldovich_overdensity(cmplx* den, const cmplx* basis, const cmplx* rands,
-		const interp_functor<float>& P, float box_size, int N);
+enum zeldovich_t{ DENSITY, DISPLACEMENT, VELOCITY };
 
-__device__ float zeldovich_displacements(cmplx* phi, const cmplx* basis, const cmplx* rands,
-		const interp_functor<float>& P, float box_size, int N, int dim);
+#define ZELDOSIZE 1024
 
-__device__ float zeldovich_velocities(cmplx* vel_k, const cmplx* basis, const cmplx* rands,
-		const interp_functor<float>& P, float box_size, int N, int dim);
+__global__ void zeldovich(cmplx* den, const cmplx* basis, const cmplx* rands,
+		const interp_functor<float>& P, float box_size, int N, int dim, zeldovich_t, float* res );
+
 #endif /* ZELDOVICH_HPP_ */

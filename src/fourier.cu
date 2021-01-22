@@ -1,5 +1,8 @@
 #include <gputiger/fourier.hpp>
 
+#define FFTSIZE_COMPUTE 2
+#define FFTSIZE_TRANSPOSE 2
+
 __global__
 void fft_basis(cmplx* X, int N) {
 	const int& thread = threadIdx.x;
@@ -110,19 +113,20 @@ void transpose_yz(cmplx* Y, int N) {
 
 __device__
 void fft3d(cmplx* Y, const cmplx* expi, int N) {
-	int nblocks = min(N * N * N / WARPSIZE, 65535);
-	fft<<<nblocks,WARPSIZE>>>(Y,expi,N);
+	int nblocksc = min(N * N * N / FFTSIZE_COMPUTE, 65535);
+	int nblockst = min(N * N * N / FFTSIZE_TRANSPOSE, 65535);
+	fft<<<nblocksc,FFTSIZE_COMPUTE>>>(Y,expi,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	transpose_yz<<<nblocks,WARPSIZE>>>(Y,N);
+	transpose_yz<<<nblockst,FFTSIZE_TRANSPOSE>>>(Y,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	fft<<<nblocks,WARPSIZE>>>(Y,expi,N);
+	fft<<<nblocksc,FFTSIZE_COMPUTE>>>(Y,expi,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	transpose_xz<<<nblocks,WARPSIZE>>>(Y,N);
+	transpose_xz<<<nblockst,FFTSIZE_TRANSPOSE>>>(Y,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	fft<<<nblocks,WARPSIZE>>>(Y,expi,N);
+	fft<<<nblocksc,FFTSIZE_COMPUTE>>>(Y,expi,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	transpose_yz<<<nblocks,WARPSIZE>>>(Y,N);
+	transpose_yz<<<nblockst,FFTSIZE_TRANSPOSE>>>(Y,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	transpose_xy<<<nblocks,WARPSIZE>>>(Y,N);
+	transpose_xy<<<nblockst,FFTSIZE_TRANSPOSE>>>(Y,N);
 	CUDA_CHECK(cudaDeviceSynchronize());
 }

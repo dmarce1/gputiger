@@ -9,6 +9,61 @@
 #define EBSIZE 1024
 #define FFTSIZE 1024
 #define RANDSIZE 1024
+#define TRANSFERSIZE 1024
+
+__global__
+void transfer_data(particle* parts, particle* host_parts) {
+	const int tid = threadIdx.x;
+	const float a = 1.f / (opts.redshift + 1.f);
+	const int N = opts.Ngrid;
+	const int N3 = N * N * N;
+	for (int i = tid; i < N3; i += TRANSFERSIZE) {
+		parts[i] = host_parts[i];
+		parts[i].rung = 0;
+		for (int dim = 0; dim < NDIM; dim++) {
+			parts[i].v[dim] *= a / opts.box_size;
+			parts[i].x[dim] /= opts.box_size;
+		}
+	}
+}
+
+__global__
+void velocities_to_particles(cmplx* phi, particle* parts, float ainit, int dim) {
+	const int tid = threadIdx.x;
+	const int N = opts.Ngrid;
+	for (int ij = tid; ij < N * N; ij += TRANSFERSIZE) {
+		int i = ij / N;
+		int j = ij % N;
+		for (int k = 0; k < N; k++) {
+			const int l = N * (N * i + j) + k;
+			float v = phi[l].real();
+			parts[l].v[dim] = v * ainit * ainit / opts.box_size;
+		}
+	}
+}
+
+__global__ void displacements_to_particles(cmplx* phi, particle* parts, int dim) {
+	const int tid = threadIdx.x;
+	const int N = opts.Ngrid;
+	for (int ij = tid; ij < N * N; ij += TRANSFERSIZE) {
+		int i = ij / N;
+		int j = ij % N;
+		for (int k = 0; k < N; k++) {
+			const int l = N * (N * i + j) + k;
+			const int I[NDIM] = { i, j, k };
+			float x = (((float) I[dim] + 0.5f) / (float) N);
+			x += phi[l].real() / opts.box_size;
+			while (x > 1.0) {
+				x -= 1.0;
+			}
+			while (x < 0.0) {
+				x += 1.0;
+			}
+			parts[l].x[dim] = x;
+		}
+	}
+
+}
 
 __global__
 void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr) {
@@ -24,6 +79,7 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		float kmin = 2.0 * (float) M_PI / opts.box_size;
 		float kmax = sqrtf(3) * (kmin * (float) (opts.Ngrid / 2));
 		int Nk = 2 * opts.Ngrid * SQRT(3);
+		float vmax, xdisp;
 
 		float normalization;
 		float *result_ptr;
@@ -70,143 +126,32 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		CUDA_CHECK(cudaDeviceSynchronize());
 
 		printf("\tComputing over/under density\n");
-		const float drho = zeldovich_overdensity(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid);
+		zeldovich<<<1,ZELDOSIZE>>>(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0, DENSITY, result_ptr);
+		CUDA_CHECK(cudaDeviceSynchronize());
+		const float drho = *result_ptr;
 		CUDA_CHECK(cudaDeviceSynchronize());
 		printf("\t\tOver/under density is %e\n", drho);
 
-		/*
-		 for (int dim = 0; dim < NDIM; dim++) {
-		 if (tid == 0) {
-		 printf("\tComputing %c velocities\n", 'x' + dim);
-		 }
-		 float vmax = zeldovich_velocities(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, 0);
-		 for (int ij = tid; ij < N * N; ij += WARPSIZE) {
-		 int i = ij / N;
-		 int j = ij % N;
-		 for (int k = 0; k < N; k++) {
-		 const int l = N * (N * i + j) + k;
-		 float v = phi[l].real();
-		 host_parts[l].v[0] = v * a / opts.box_size;
-		 }
-		 }
-		 if (tid == 0) {
-		 printf("\tComputing %c positions\n", 'x' + dim);
-		 }
-		 float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
-		 for (int ij = tid; ij < N * N; ij += WARPSIZE) {
-		 int i = ij / N;
-		 int j = ij % N;
-		 for (int k = 0; k < N; k++) {
-		 const int l = N * (N * i + j) + k;
-		 const int I[NDIM] = { i, j, k };
-		 float x = (((float) I[dim] + 0.5f) / (float) N);
-		 x += phi[l].real() / opts.box_size;
-		 while (x > 1.0) {
-		 x -= 1.0;
-		 }
-		 while (x < 0.0) {
-		 x += 1.0;
-		 }
-		 host_parts[l].x[dim] = x;
-		 }
-		 }
-		 }
+		for (int dim = 0; dim < NDIM; dim++) {
+			printf("\t\tComputing %c velocities\n", 'x' + dim);
+			zeldovich<<<1,ZELDOSIZE>>>(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, dim, VELOCITY, result_ptr);
+			velocities_to_particles<<<1,TRANSFERSIZE>>>(phi, host_parts, ainit, dim);
+			CUDA_CHECK(cudaDeviceSynchronize());
+			vmax = fmaxf(*result_ptr, vmax);
+			printf("\t\tComputing %c positions\n", 'x' + dim);
+			zeldovich<<<1,ZELDOSIZE>>>(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, dim, DISPLACEMENT, result_ptr);
+			displacements_to_particles<<<1,TRANSFERSIZE>>>(phi, host_parts, dim);
+			CUDA_CHECK(cudaDeviceSynchronize());
+			xdisp = fmaxf(*result_ptr, xdisp);
+		}
+		xdisp /= opts.box_size / opts.Ngrid;
+		printf("\t\tMaximum displacement is %e\n", xdisp);
+		printf("\t\tMaximum velocity is %e\n", vmax);
 
+		printf("\tTransferring data back from host\n");
+		transfer_data<<<1,TRANSFERSIZE>>>(parts,host_parts);
+		printf("Initialization complete\n");
 
-		 /*
-		 printf("\tComputing randoms\n");
-		 printf("\tInitializing EB\n");
-		 int iter = 0;
-		 float logamin = LOG(zeroverse_ptr->amin);
-		 float logamax = LOG(zeroverse_ptr->amax);
-		 float drho;
-		 float last_drho;
-		 float last_a;
-		 float dtau = taumax / opts.nout;
-		 float taumin = 1.0 / (zeroverse_ptr->amin * zeroverse_ptr->hubble(zeroverse_ptr->amin));
-		 float a = zeroverse_ptr->amin;
-		 float tau;
-		 for (tau = taumin; tau < taumax - dtau; tau += dtau) {
-		 last_a = a;
-		 a = zeroverse_ptr->conformal_time_to_scale_factor(tau + dtau);
-		 if (tid == 0) {
-		 printf("\tAdvancing Einstein Boltzmann solutions from redshift %.1f to %.1f\n", 1 / last_a - 1,
-		 1 / a - 1);
-		 }
-		 last_drho = drho;
-		 drho = zeldovich_overdensity(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid);
-		 if (tid == 0) {
-		 printf("\tMaximum over/under density is %e\n", drho);
-		 }
-		 if (iter > 0) {
-		 if (drho > opts.max_overden) {
-		 drho = last_drho;
-		 break;
-		 }
-		 }
-		 iter++;
-		 }
-		 a = zeroverse_ptr->conformal_time_to_scale_factor(tau);
-
-		 a = 0.025;
-		 if (tid == 0) {
-		 printf(
-		 "Computing initial conditions for non-linear evolution to begin at redshift %e with a maximum over/under density of %e\n",
-		 1 / a - 1, drho);
-		 }
-		 einstein_boltzmann_init_set(states, zeroverse_ptr, kmin, kmax, Nk, zeroverse_ptr->amin, normalization);
-		 einstein_boltzmann_interpolation_function(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, Nk,
-		 zeroverse_ptr->amin, a);
-		 for (int dim = 0; dim < NDIM; dim++) {
-		 if (tid == 0) {
-		 printf("\tComputing %c velocities\n", 'x' + dim);
-		 }
-		 float vmax = zeldovich_velocities(phi, basis, rands, *vel_k, opts.box_size, opts.Ngrid, 0);
-		 for (int ij = tid; ij < N * N; ij += WARPSIZE) {
-		 int i = ij / N;
-		 int j = ij % N;
-		 for (int k = 0; k < N; k++) {
-		 const int l = N * (N * i + j) + k;
-		 float v = phi[l].real();
-		 host_parts[l].v[0] = v * a / opts.box_size;
-		 }
-		 }
-		 if (tid == 0) {
-		 printf("\tComputing %c positions\n", 'x' + dim);
-		 }
-		 float xdisp = zeldovich_displacements(phi, basis, rands, *den_k, opts.box_size, opts.Ngrid, 0);
-		 for (int ij = tid; ij < N * N; ij += WARPSIZE) {
-		 int i = ij / N;
-		 int j = ij % N;
-		 for (int k = 0; k < N; k++) {
-		 const int l = N * (N * i + j) + k;
-		 const int I[NDIM] = { i, j, k };
-		 float x = (((float) I[dim] + 0.5f) / (float) N);
-		 x += phi[l].real() / opts.box_size;
-		 while (x > 1.0) {
-		 x -= 1.0;
-		 }
-		 while (x < 0.0) {
-		 x += 1.0;
-		 }
-		 host_parts[l].x[dim] = x;
-		 }
-		 }
-		 }
-		 for (int ij = tid; ij < N * N; ij += WARPSIZE) {
-		 int i = ij / N;
-		 int j = ij % N;
-		 for (int k = 0; k < N; k++) {
-		 const int l = N * (N * i + j) + k;
-		 host_parts[l].rung = 0;
-		 }
-		 }
-		 for (int i = tid; i < N3; i += WARPSIZE) {
-		 parts[i] = host_parts[i];
-		 for (int dim = 0; dim < NDIM; dim++) {
-		 parts[i].v[dim] *= a;
-		 }
-		 }*/
 		CUDA_CHECK(cudaFree(zeroverse_ptr));
 		CUDA_CHECK(cudaFree(&result_ptr));
 		CUDA_CHECK(cudaFree(&func_ptr));
@@ -216,52 +161,5 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		CUDA_CHECK(cudaFree(&vel_k));
 	}
 
-	/*	__shared__ tree* root;
-	 __syncthreads();
-	 if (tid == 0) {
-	 printf("\tBegining non-linear evolution\n");
-	 tree::initialize(parts, arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * TREESPACE, etable);
-	 CUDA_CHECK(cudaMalloc(&root, sizeof(tree)));
-	 }
-	 __syncthreads();
-	 __shared__ range root_range;
-	 if (tid < 3) {
-	 root_range.begin[tid] = float(0.0);
-	 root_range.end[tid] = float(1.0);
-	 }
-	 __syncthreads();
-	 if (tid == 0) {
-	 printf("\tSorting\n");
-	 root_tree_sort<<<1,MAXTHREADCOUNT>>>(root, host_parts, parts, parts+N3, root_range);
-	 CUDA_CHECK(cudaGetLastError());
-	 }
-	 __syncthreads();
-	 if (tid == 0) {
-	 CUDA_CHECK(cudaDeviceSynchronize());
-	 }
-	 __syncthreads();
-	 if (tid == 0) {
-	 printf("\tKicking\n");
-	 root->kick(root, 0, 0.1, ewald_ptr);
-	 CUDA_CHECK(cudaGetLastError());
-	 }
-	 __syncthreads();
-	 if (tid == 0) {
-	 CUDA_CHECK(cudaDeviceSynchronize());
-	 }
-	 __syncthreads();
-
-	 if (tid == 0) {
-	 delete zeroverse_ptr;
-	 delete result_ptr;
-	 delete func_ptr;
-	 CUDA_CHECK(cudaFree(basis));
-	 CUDA_CHECK(cudaFree(states));
-	 CUDA_CHECK(cudaFree(root));
-	 CUDA_CHECK(cudaFree(etable));
-	 delete den_k;
-	 delete vel_k;
-	 }
-	 }*/
-
 }
+
