@@ -13,27 +13,10 @@
 #include <gputiger/monopole.hpp>
 #include <gputiger/ewald.hpp>
 
-struct tree;
-/*
-struct tree_sort_type {
-	array<monopole, NCHILD> poles;
-	array<tree*, NCHILD> tree_ptrs;
-	array<range, NCHILD> boxes;
-	array<particle*, NCHILD> begins;
-	array<particle*, NCHILD> ends;
-};
+#define KICKWARPSIZE 32
+#define KICKEWALDWARPSIZE 32
 
-struct sort_workspace {
-	array<particle*, NCHILD> begin;
-	array<particle*, NCHILD> end;
-	array<range, NCHILD> cranges;
-	int hi;
-	int lo;
-	array<array<float, NDIM>,WARPSIZE> poles;
-	tree_sort_type* tree_sort;
-	array<float,WARPSIZE> count;
-};
-*/
+
 struct tree {
 	array<tree*, NCHILD> children;
 	range box;
@@ -44,7 +27,7 @@ struct tree {
 	bool leaf;
 
 	__device__
-	static void initialize(particle* parts, void* arena, size_t bytes, ewald_table_t* etable);
+	static void initialize(particle* parts, void* arena, size_t bytes);
 	__device__
 	  static tree* alloc();
 	__device__
@@ -56,6 +39,12 @@ struct tree {
 
 
 __global__
-void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range box);
+void root_tree_sort(void* dataspace, int space_size, particle* swap_space, particle* parts, int* cnt);
+
+__global__
+void tree_kick(int rung, float dt, double* flops);
+
+__global__
+void tree_kick_ewald(int rung, float dt, double* flops);
 
 #endif /* TREE_HPP_ */

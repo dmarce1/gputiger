@@ -23,20 +23,17 @@ __device__
                    static ewald_table_t* etable;
 
 __device__
-              static cudaTextureObject_t* tex_ewald;
+          cudaTextureObject_t* tex_ewald;
 
 __device__
-void tree::initialize(particle* parts, void* data, size_t bytes, ewald_table_t* etable_) {
-	etable = etable_;
+void tree::initialize(particle* parts, void* data, size_t bytes) {
 	int sztot = sizeof(tree) + sizeof(int);
 	int N = bytes / sztot;
-	printf("Allocating space for %i trees\n", N);
 	next_index = 0;
 	arena_size = N;
 	tree_base = (tree*) data;
 	leaf_list = (int*) (data + sizeof(tree) * N);
 	leaf_count = 0;
-	printf("Done allocating trees\n");
 }
 
 __device__ tree* tree::alloc() {
@@ -80,15 +77,22 @@ __device__ particle* sort_parts(particle* swap, particle* b, particle* e, float 
 	}
 }
 
+__device__ tree root;
+
 __global__
-void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range box) {
+void root_tree_sort(void* dataspace, int space_size, particle* swap_space, particle* parts, int* cnt) {
 	if (threadIdx.x == 0) {
-		root->part_begin = pbegin;
-		root->part_end = pend;
-		root->box = box;
+		tree::initialize(parts, dataspace, space_size);
+		root.part_begin = parts;
+		root.part_end = parts + opts.Ngrid*opts.Ngrid*opts.Ngrid;
+		for( int dim = 0; dim < NDIM; dim++) {
+			root.box.begin[dim] = 0.f;
+			root.box.end[dim] = 1.f;
+		}
 	}
 	__syncthreads();
-	root->sort(swap_space, 0);
+	root.sort(swap_space, 0);
+	*cnt = leaf_count;
 }
 
 __global__
@@ -341,9 +345,6 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 	return pole;
 }
 
-#define KICKWARPSIZE 32
-
-#define KICKEWALDWARPSIZE 32
 
 struct direct_t {
 	const tree* self;
@@ -354,7 +355,7 @@ struct direct_t {
 #define OTHERSMAX 256
 
 __global__
-void tree_kick(tree* root, int rung, float dt, double* flops) {
+void tree_kick(int rung, float dt, double* flops) {
 	const int& tid = threadIdx.x;
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
@@ -399,7 +400,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		for (int i = 0; i < MAXDEPTH; i++) {
 			child_indexes[i] = 0;
 		}
-		pointers[0] = root;
+		pointers[0] = &root;
 		depth = 0;
 		do {
 			const auto& other = *pointers[depth];
@@ -509,7 +510,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 #define OTHERSMAX2 128
 
 __global__
-void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
+void tree_kick_ewald(int rung, float dt, double* flops) {
 	const int& tid = threadIdx.x;
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
@@ -554,7 +555,7 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 		for (int i = 0; i < MAXDEPTH; i++) {
 			child_indexes[i] = 0;
 		}
-		pointers[0] = root;
+		pointers[0] = &root;
 		depth = 0;
 		do {
 			const auto& other = *pointers[depth];
@@ -662,6 +663,7 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 	}
 }
 
+/*
 __device__
 void tree::kick(tree* root, int rung, float dt, cudaTextureObject_t* tex_ewald_) {
 	tex_ewald = tex_ewald_;
@@ -682,4 +684,4 @@ void tree::kick(tree* root, int rung, float dt, cudaTextureObject_t* tex_ewald_)
 	CUDA_CHECK(cudaFree(flops));
 
 }
-
+*/

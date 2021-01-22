@@ -65,10 +65,14 @@ __global__ void displacements_to_particles(cmplx* phi, particle* parts, int dim)
 
 }
 
+__device__
+           extern cudaTextureObject_t* tex_ewald;
+
 __global__
 void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr) {
 	const int tid = threadIdx.x;
 	if (tid == 0) {
+		tex_ewald = ewald_ptr;
 		opts = opts_;
 
 		const int N = opts.Ngrid;

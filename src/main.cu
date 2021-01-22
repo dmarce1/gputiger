@@ -20,12 +20,16 @@ cudaTextureObject_t* host_ewald;
 #define KERNEL_DEPTH 13
 #define HEAP_SIZE (4*1024*1024)
 
+
+#define TREESORTSIZE 32
+
 int main() {
+	timer time;
 	size_t stack_size = STACK_SIZE;
 	size_t recur_limit = KERNEL_DEPTH;
 	size_t heap_size = HEAP_SIZE;
 	cudaDeviceProp prop;
-	CUDA_CHECK(cudaGetDeviceProperties(&prop,0 ));
+	CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
 	//printf( "Maximum pitch %lli\n", prop.memPitch);
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, recur_limit));
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitStackSize, stack_size));
@@ -61,7 +65,7 @@ int main() {
 	opts.Ngrid = 256;
 	opts.sigma8 = 0.8367;
 	opts.max_overden = 1.0;
-	opts.box_size = 1000;//613.0 *opts.Ngrid/2160.0;
+	opts.box_size = 1000; //613.0 *opts.Ngrid/2160.0;
 	//	opts.box_size = 613.0 / 2160.0 * opts.Ngrid;
 	opts.nout = 64;
 	opts.max_kernel_depth = KERNEL_DEPTH - 1;
@@ -91,7 +95,7 @@ int main() {
 		copyParams.srcPos = make_cudaPos(0, 0, 0);
 		copyParams.dstPos = make_cudaPos(0, 0, 0);
 		copyParams.srcPtr = make_cudaPitchedPtr((*etable)[i].data(), EWALD_DIM * sizeof(float), EWALD_DIM,
-				EWALD_DIM);
+		EWALD_DIM);
 		copyParams.dstArray = d_cuArr;
 		copyParams.extent = make_cudaExtent(EWALD_DIM, EWALD_DIM, EWALD_DIM);
 		copyParams.kind = cudaMemcpyDeviceToDevice;
@@ -122,6 +126,32 @@ int main() {
 	initialize<<<1, 1>>>(arena, parts_ptr, opts, host_ewald);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
+	double* flops;
+	double dt = 0.f;
+	int* leaf_count, rung = 0;
+	CUDA_MALLOC_MANAGED(&flops, sizeof(double));
+	CUDA_MALLOC_MANAGED(&leaf_count, sizeof(int));
+
+	printf("Entering main execution loop.\n");
+
+	time.start();
+	printf("\tSorting\n");
+	root_tree_sort<<<1,TREESORTSIZE>>>(arena + 8*sizeof(float)*N3, TREESPACE*sizeof(float)*N3, parts_ptr, (particle*) arena, leaf_count);
+	CUDA_CHECK(cudaDeviceSynchronize());
+	printf("\t\tSort took %e seconds\n", time.stop());
+
+	printf("\t\tKicking\n");
+	time.start();
+	int blocks_needed = (*leaf_count - 1) + 1;
+	int block_size = sqrtf(float(blocks_needed - 1)) + 1;
+	dim3 dim;
+	dim.x = dim.y = block_size;
+	dim.z = 1;
+	*flops = 0.0;
+	tree_kick<<<dim,KICKWARPSIZE>>>(rung,dt, flops);
+	tree_kick_ewald<<<dim,KICKEWALDWARPSIZE>>>(rung,dt, flops);
+	CUDA_CHECK(cudaDeviceSynchronize());
+	printf("\t\tKick took %e seconds\n", time.stop());
 
 	/*	 size_t stack_size;
 	 size_t desired_stack_size = 4 * 1024;
