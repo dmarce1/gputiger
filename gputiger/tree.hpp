@@ -48,7 +48,7 @@ struct tree {
 	__device__
 	  static tree* alloc();
 	__device__
-	monopole sort(particle* swap_space, particle* pbegin, particle* pend, range,  int depth, int rung);
+	monopole sort(particle* swap_space, int depth);
 	__device__
 	void kick(tree* root, int rung, float dt,cudaTextureObject_t* tex_ewald);
 
@@ -56,6 +56,6 @@ struct tree {
 
 
 __global__
-void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range box, int rung);
+void root_tree_sort(tree* root,particle* swap_space,  particle* pbegin, particle* pend, const range box);
 
 #endif /* TREE_HPP_ */

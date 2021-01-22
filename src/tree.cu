@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                        static tree* tree_base;
+                                                                                                                          static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,10 +20,10 @@ __device__
 static int leaf_count;
 
 __device__
-     static ewald_table_t* etable;
+       static ewald_table_t* etable;
 
 __device__
-static cudaTextureObject_t* tex_ewald;
+  static cudaTextureObject_t* tex_ewald;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes, ewald_table_t* etable_) {
@@ -81,27 +81,32 @@ __device__ particle* sort_parts(particle* swap, particle* b, particle* e, float 
 }
 
 __global__
-void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range box, int rung) {
-	root->sort(swap_space, pbegin, pend, box, 0, rung);
+void root_tree_sort(tree* root, particle* swap_space, particle* pbegin, particle* pend, const range box) {
+	if (threadIdx.x == 0) {
+		root->part_begin = pbegin;
+		root->part_end = pend;
+		root->box = box;
+	}
+	__syncthreads();
+	root->sort(swap_space, 0);
 }
 
 __global__
-void tree_sort(tree** children, particle* swap_space, int depth, int rung) {
+void tree_sort(tree** children, particle* swap_space, int depth) {
 	const int& bid = blockIdx.x;
 	particle* base = children[0]->part_begin;
 	particle* b = children[bid]->part_begin;
 	particle* e = children[bid]->part_end;
 	particle* this_swap = swap_space + (b - base);
 	range box = children[bid]->box;
-	const auto tmp = children[bid]->sort(this_swap, b, e, box, depth, rung);
+	const auto tmp = children[bid]->sort(this_swap, depth);
 	if (threadIdx.x == 0) {
 		children[bid]->pole = tmp;
 	}
 	__syncthreads();
 }
 
-__device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle* pend, range box_, int depth_,
-		int rung) {
+__device__ monopole tree::sort(particle* swap_space, int depth_) {
 	const int tid = threadIdx.x;
 	//const int block_size = blockDim.x;
 	__shared__ array<array<fixed64, NDIM>, WARPSIZE> poles;
@@ -110,11 +115,8 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 			printf("Maximum depth exceeded in sort\n");
 			__trap();
 		}
-		part_begin = pbegin;
-		part_end = pend;
 		depth = depth_;
 		leaf = false;
-		box = box_;
 	}
 	float midx;
 	particle* mid;
@@ -132,7 +134,7 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 	//	printf("Sorting at depth %i\n", depth);
 	__syncthreads();
 
-	if (pend - pbegin > opts.parts_per_bucket) {
+	if (part_end - part_begin > opts.parts_per_bucket) {
 		if (tid == 0) {
 			for (int ci = 0; ci < NCHILD; ci++) {
 				children[ci] = alloc();
@@ -148,7 +150,7 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 			}
 		}
 		midx = (box.begin[long_dim] / float(2) + box.end[long_dim] / float(2));
-		mid = sort_parts(swap_space, pbegin, pend, midx, long_dim);
+		mid = sort_parts(swap_space, part_begin, part_end, midx, long_dim);
 		if (tid == 0) {
 			children[0]->box = box;
 			children[1]->box = box;
@@ -162,8 +164,7 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 		if (depth >= opts.max_kernel_depth) {
 			for (int ci = 0; ci < NCHILD; ci++) {
 				particle* swap_base = swap_space + (children[ci]->part_begin - children[0]->part_begin);
-				monopole this_pole = children[ci]->sort(swap_base, children[ci]->part_begin, children[ci]->part_end,
-						children[ci]->box, depth + 1, rung);
+				monopole this_pole = children[ci]->sort(swap_base, depth + 1);
 			}
 			__syncthreads();
 		} else {
@@ -175,7 +176,7 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 				} else {
 					threadcnt = max(min((int) ((part_end - part_begin) / NCHILD), (int) MAXTHREADCOUNT), WARPSIZE);
 				}
-				tree_sort<<<NCHILD,threadcnt>>>(children.data(), swap_space, depth+1, rung);
+				tree_sort<<<NCHILD,threadcnt>>>(children.data(), swap_space, depth+1);
 
 				if (tid == 0) {
 					CUDA_CHECK(cudaGetLastError());
@@ -415,7 +416,6 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	}
 }
 
-
 #define OTHERSMAX2 128
 
 __global__
@@ -573,7 +573,7 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 }
 
 __device__
-void tree::kick(tree* root, int rung, float dt, cudaTextureObject_t* tex_ewald_ ) {
+void tree::kick(tree* root, int rung, float dt, cudaTextureObject_t* tex_ewald_) {
 	tex_ewald = tex_ewald_;
 	int blocks_needed = (leaf_count - 1) + 1;
 	int block_size = SQRT(float(blocks_needed -1 )) + 1;

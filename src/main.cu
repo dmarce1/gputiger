@@ -228,7 +228,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_, cudaTextureOb
 	__syncthreads();
 	if (thread == 0) {
 		printf("Sorting\n");
-		root_tree_sort<<<1,MAXTHREADCOUNT>>>(root, host_parts, parts, parts+N3, root_range, 0);
+		root_tree_sort<<<1,MAXTHREADCOUNT>>>(root, host_parts, parts, parts+N3, root_range);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
@@ -262,13 +262,14 @@ void main_kernel(void* arena, particle* host_parts, options opts_, cudaTextureOb
 
 cudaTextureObject_t* host_ewald;
 
+#define KERNEL_DEPTH 13
 int main() {
 
 	options opts;
 
 	size_t stack_size;
 	size_t desired_stack_size = 4 * 1024;
-	size_t rlimit = 12;
+	size_t rlimit = KERNEL_DEPTH+1;
 	size_t heapsize = 4 * 1024 * 1024;
 	CUDA_CHECK(cudaDeviceSetLimit(cudaLimitDevRuntimeSyncDepth, rlimit));
 	CUDA_CHECK(cudaDeviceGetLimit(&rlimit, cudaLimitDevRuntimeSyncDepth));
@@ -299,7 +300,7 @@ int main() {
 	opts.box_size = 1000;
 	//	opts.box_size = 613.0 / 2160.0 * opts.Ngrid;
 	opts.nout = 64;
-	opts.max_kernel_depth = 11;
+	opts.max_kernel_depth = KERNEL_DEPTH;
 	opts.parts_per_bucket = 64;
 	opts.opening_crit = 0.7;
 	opts.nparts = opts.Ngrid * opts.Ngrid * opts.Ngrid;
