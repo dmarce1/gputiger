@@ -19,7 +19,7 @@ __device__ float test(float x) {
 	return x * x;
 }
 __global__
-void main_kernel(void* arena, particle* host_parts, options opts_) {
+void main_kernel(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr) {
 	const int thread = threadIdx.x;
 	if (thread == 0) {
 		opts = opts_;
@@ -39,16 +39,6 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	cmplx* phi = (cmplx*) arena;
 	cmplx* rands = ((cmplx*) arena) + N3;
 	particle* parts = (particle*) arena;
-
-	if (thread == 0) {
-		printf("Computing ewald tables\n");
-		CUDA_CHECK(cudaMalloc(&etable, sizeof(ewald_table_t)));
-		compute_ewald_table<<<EWALD_DIM*EWALD_DIM, EWALD_DIM>>>(etable);
-	}
-	__syncthreads();
-	if (thread == 0) {
-		CUDA_CHECK(cudaDeviceSynchronize());
-	}
 	if (thread == 0) {
 		zeroverse_ptr = new zero_order_universe;
 		create_zero_order_universe(zeroverse_ptr, 1.0);
@@ -118,7 +108,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	float taumin = 1.0 / (zeroverse_ptr->amin * zeroverse_ptr->hubble(zeroverse_ptr->amin));
 	float a = zeroverse_ptr->amin;
 	/*float tau;
-	for (tau = taumin; tau < taumax - dtau; tau += dtau) {
+	 for (tau = taumin; tau < taumax - dtau; tau += dtau) {
 	 last_a = a;
 	 a = zeroverse_ptr->conformal_time_to_scale_factor(tau + dtau);
 	 if (thread == 0) {
@@ -248,7 +238,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Kicking\n");
-		root->kick(root, 0, 0.1);
+		root->kick(root, 0, 0.1, ewald_ptr);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
@@ -270,9 +260,11 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	}
 }
 
+cudaTextureObject_t* host_ewald;
+
 int main() {
 
-	options params;
+	options opts;
 
 	size_t stack_size;
 	size_t desired_stack_size = 4 * 1024;
@@ -293,33 +285,69 @@ int main() {
 
 	struct cudaDeviceProp prop;
 	CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
-	params.clock_rate = prop.clockRate * pow(1024 / 1000, 3) * 1000;
-	printf("Clock rate = %e\n", params.clock_rate);
-	params.h = 0.697;
-	params.Neff = 3.84;
-	params.Y = 0.24;
-	params.omega_b = 0.0240 / (params.h * params.h);
-	params.omega_c = 0.1146 / (params.h * params.h);
-	params.Theta = 1.0;
-	params.Ngrid = 256;
-	params.sigma8 = 0.8367;
-	params.max_overden = 1.0;
-	params.box_size = 1000;
-	//	params.box_size = 613.0 / 2160.0 * params.Ngrid;
-	params.nout = 64;
-	params.max_kernel_depth =  11;
-	params.parts_per_bucket = 64;
-	params.opening_crit = 0.7;
-	params.nparts = params.Ngrid * params.Ngrid * params.Ngrid;
-	params.hsoft = params.Ngrid / 50.0;
+	opts.clock_rate = prop.clockRate * pow(1024 / 1000, 3) * 1000;
+	printf("Clock rate = %e\n", opts.clock_rate);
+	opts.h = 0.697;
+	opts.Neff = 3.84;
+	opts.Y = 0.24;
+	opts.omega_b = 0.0240 / (opts.h * opts.h);
+	opts.omega_c = 0.1146 / (opts.h * opts.h);
+	opts.Theta = 1.0;
+	opts.Ngrid = 256;
+	opts.sigma8 = 0.8367;
+	opts.max_overden = 1.0;
+	opts.box_size = 1000;
+	//	opts.box_size = 613.0 / 2160.0 * opts.Ngrid;
+	opts.nout = 64;
+	opts.max_kernel_depth = 11;
+	opts.parts_per_bucket = 64;
+	opts.opening_crit = 0.7;
+	opts.nparts = opts.Ngrid * opts.Ngrid * opts.Ngrid;
+	opts.hsoft = opts.Ngrid / 50.0;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
-			* (1 + params.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
-			* std::pow(constants::c, -3) * std::pow(2.73 * params.Theta, 4) * std::pow(params.h, -2);
-	params.omega_nu = omega_r * params.Neff / (8.0 / 7.0 * std::pow(11.0 / 4.0, 4.0 / 3.0) + params.Neff);
-	params.omega_gam = omega_r - params.omega_nu;
+			* (1 + opts.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
+			* std::pow(constants::c, -3) * std::pow(2.73 * opts.Theta, 4) * std::pow(opts.h, -2);
+	opts.omega_nu = omega_r * opts.Neff / (8.0 / 7.0 * std::pow(11.0 / 4.0, 4.0 / 3.0) + opts.Neff);
+	opts.omega_gam = omega_r - opts.omega_nu;
 	void* arena;
-	const int N = params.Ngrid;
+	const int N = opts.Ngrid;
 	const int N3 = N * N * N;
+
+	ewald_table_t* etable;
+	printf("Computing ewald tables\n");
+	CUDA_CHECK(cudaMallocManaged(&etable, sizeof(ewald_table_t)));
+	CUDA_CHECK(cudaMallocManaged(&host_ewald, sizeof(cudaTextureObject_t)));
+	compute_ewald_table<<<EWALD_DIM*EWALD_DIM, EWALD_DIM>>>(etable);
+	CUDA_CHECK(cudaDeviceSynchronize());
+
+	for (int i = 0; i < NDIM + 1; i++) {
+		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>();
+		cudaArray *d_cuArr;
+		CUDA_CHECK(
+				cudaMalloc3DArray(&d_cuArr, &channelDesc,
+						make_cudaExtent(opts.Ngrid * sizeof(float), opts.Ngrid, opts.Ngrid), 0));
+		cudaMemcpy3DParms copyParams = { 0 };
+		copyParams.srcPtr = make_cudaPitchedPtr((*etable)[i].data(), opts.Ngrid * sizeof(float), opts.Ngrid,
+				opts.Ngrid);
+		copyParams.dstArray = d_cuArr;
+		copyParams.extent = make_cudaExtent(opts.Ngrid, opts.Ngrid, opts.Ngrid);
+		copyParams.kind = cudaMemcpyDeviceToDevice;
+		CUDA_CHECK(cudaMemcpy3D(&copyParams));
+		cudaResourceDesc texRes;
+		memset(&texRes, 0, sizeof(cudaResourceDesc));
+		texRes.resType = cudaResourceTypeArray;
+		texRes.res.array.array = d_cuArr;
+		cudaTextureDesc texDescr;
+		memset(&texDescr, 0, sizeof(cudaTextureDesc));
+		texDescr.normalizedCoords = false;
+		texDescr.filterMode = cudaFilterModeLinear;
+		texDescr.addressMode[0] = cudaAddressModeClamp;   // clamp
+		texDescr.addressMode[1] = cudaAddressModeClamp;
+		texDescr.addressMode[2] = cudaAddressModeClamp;
+		texDescr.readMode = cudaReadModeElementType;
+		CUDA_CHECK(cudaCreateTextureObject(&host_ewald[i], &texRes, &texDescr, NULL));
+	}
+
 	CUDA_CHECK(cudaMallocManaged(&parts_ptr, sizeof(particle) * N3));
 	size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
 	printf("Allocating arena of %li Mbytes\n", (arena_size / 1024 / 1024));
@@ -328,10 +356,13 @@ int main() {
 		printf("Not enough memory\n");
 		abort();
 	}
-	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, params);
+	main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, opts, host_ewald);
 	CUDA_CHECK(cudaGetLastError());
 
 	CUDA_CHECK(cudaDeviceSynchronize());
 	CUDA_CHECK(cudaFree(arena));
 	CUDA_CHECK(cudaFree(parts_ptr));
+	CUDA_CHECK(cudaFree(etable));
+	CUDA_CHECK(cudaFree(host_ewald));
+
 }

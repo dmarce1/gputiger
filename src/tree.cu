@@ -23,6 +23,9 @@ __device__
      static ewald_table_t* etable;
 
 __device__
+static cudaTextureObject_t* tex_ewald;
+
+__device__
 void tree::initialize(particle* parts, void* data, size_t bytes, ewald_table_t* etable_) {
 	etable = etable_;
 	int sztot = sizeof(tree) + sizeof(int);
@@ -527,7 +530,7 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 				__syncthreads();
 				const tree& self = *(tree_base + leaf_list[myindex]);
 				if (tid == 0) {
-					atomicAdd(flops, double(42 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX2)));
+					atomicAdd(flops, double(128 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX2)));
 				}
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
 					const auto& sink_x = sink->x;
@@ -539,44 +542,13 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 						for (int dim = 0; dim < NDIM; dim++) {
 							X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
 							absX[dim] = abs(X[dim]);
-							const int x = absX[0] * dewald;
-							const int y = absX[1] * dewald;
-							const int z = absX[2] * dewald;
-							const int xi0 = x;
-							const int yi0 = y;
-							const int zi0 = z;
-							const int xi1 = xi0 + 1;
-							const int yi1 = yi0 + 1;
-							const int zi1 = zi0 + 1;
-							const float wx0 = x - xi0;
-							const float wy0 = y - yi0;
-							const float wz0 = z - zi0;
-							const float wx1 = 1.f - wx0;
-							const float wy1 = 1.f - wy0;
-							const float wz1 = 1.f - wz0;
-							const float wy1wz1 = wy1 * wz1;
-							const float wy1wz0 = wy1 * wz0;
-							const float wy0wz1 = wy0 * wz1;
-							const float wy0wz0 = wy0 * wz0;
-							const float w000 = wx1 * wy1wz1;
-							const float w001 = wx1 * wy1wz0;
-							const float w010 = wx1 * wy0wz1;
-							const float w011 = wx1 * wy0wz0;
-							const float w100 = wx0 * wy1wz1;
-							const float w101 = wx0 * wy1wz0;
-							const float w110 = wx0 * wy0wz1;
-							const float w111 = wx0 * wy0wz0;
 							const int index = sink - self.part_begin;
+							const float x0 = absX[0] * dewald + 0.5;
+							const float y0 = absX[1] * dewald + 0.5;
+							const float z0 = absX[2] * dewald + 0.5;
 							for (int dim = 0; dim < NDIM; dim++) {
-								const float sgn = copysign(1.f, X[dim]);
-								F[index][dim] += w000 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi0][dim];
-								F[index][dim] += w001 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi1][dim];
-								F[index][dim] += w010 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi0][dim];
-								F[index][dim] += w011 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi1][dim];
-								F[index][dim] += w100 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi0][dim];
-								F[index][dim] += w101 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi1][dim];
-								F[index][dim] += w110 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi0][dim];
-								F[index][dim] += w111 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi1][dim];
+								float tmp = tex3D<float>(tex_ewald[dim], x0, y0, z0);
+								F[index][dim] += tmp;
 							}
 
 						}
@@ -601,7 +573,8 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 }
 
 __device__
-void tree::kick(tree* root, int rung, float dt) {
+void tree::kick(tree* root, int rung, float dt, cudaTextureObject_t* tex_ewald_ ) {
+	tex_ewald = tex_ewald_;
 	int blocks_needed = (leaf_count - 1) + 1;
 	int block_size = SQRT(float(blocks_needed -1 )) + 1;
 	assert(block_size * block_size >= leaf_count);

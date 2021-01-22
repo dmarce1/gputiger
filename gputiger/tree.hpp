@@ -50,7 +50,7 @@ struct tree {
 	__device__
 	monopole sort(particle* swap_space, particle* pbegin, particle* pend, range,  int depth, int rung);
 	__device__
-	void kick(tree* root, int rung, float dt);
+	void kick(tree* root, int rung, float dt,cudaTextureObject_t* tex_ewald);
 
 };
 
