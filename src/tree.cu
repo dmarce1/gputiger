@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                                      static tree* tree_base;
+                                                                                                                                        static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,10 +20,9 @@ __device__
 static int leaf_count;
 
 __device__
-                   static ewald_table_t* etable;
+                     static ewald_table_t* etable;
 
-__device__
-          cudaTextureObject_t* tex_ewald;
+__device__ cudaTextureObject_t* tex_ewald;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes) {
@@ -84,8 +83,8 @@ void root_tree_sort(void* dataspace, int space_size, particle* swap_space, parti
 	if (threadIdx.x == 0) {
 		tree::initialize(parts, dataspace, space_size);
 		root.part_begin = parts;
-		root.part_end = parts + opts.Ngrid*opts.Ngrid*opts.Ngrid;
-		for( int dim = 0; dim < NDIM; dim++) {
+		root.part_end = parts + opts.Ngrid * opts.Ngrid * opts.Ngrid;
+		for (int dim = 0; dim < NDIM; dim++) {
 			root.box.begin[dim] = 0.f;
 			root.box.end[dim] = 1.f;
 		}
@@ -345,7 +344,6 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 	return pole;
 }
 
-
 struct direct_t {
 	const tree* self;
 	const tree* other;
@@ -355,7 +353,7 @@ struct direct_t {
 #define OTHERSMAX 256
 
 __global__
-void tree_kick(int rung, float dt, double* flops) {
+void tree_kick(int rung, float dt, double* nactive) {
 	const int& tid = threadIdx.x;
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
@@ -457,9 +455,6 @@ void tree_kick(int rung, float dt, double* flops) {
 			if (other_cnt >= OTHERSMAX || done) {
 				__syncthreads();
 				const tree& self = *(tree_base + leaf_list[myindex]);
-				if (tid == 0) {
-					atomicAdd(flops, double(42 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX)));
-				}
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
 					if (sink->rung >= rung) {
 						const auto& sink_x = sink->x;
@@ -469,15 +464,15 @@ void tree_kick(int rung, float dt, double* flops) {
 							{
 								const auto& source_x = others[oi];
 								for (int dim = 0; dim < NDIM; dim++) {
-									X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
+									X[dim] = source_x[dim].ewald_dif(sink_x[dim]); // 9
 								}
 							}
 							{
-								float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2], h2));
-								Xinv3 = Xinv3 * Xinv3 * Xinv3;
+								float Xinv3 = rsqrtf(fmaxf(X[0] * X[0] + X[1] * X[1] + X[2] * X[2], h2)); // 7 + 3
+								Xinv3 = Xinv3 * Xinv3 * Xinv3; //2
 								const int index = sink - self.part_begin;
 								for (int dim = 0; dim < NDIM; dim++) {
-									F[index][dim] += X[dim] * Xinv3; // 2
+									F[index][dim] += X[dim] * Xinv3; // 6
 								}
 							}
 						}
@@ -500,8 +495,10 @@ void tree_kick(int rung, float dt, double* flops) {
 		} while (!done);
 		const float GM = opts.particle_mass * opts.G;
 		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
-			for (int dim = 0; dim < NDIM; dim++) {
-				p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+			if (p->rung >= rung) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+				}
 			}
 		}
 	}
@@ -510,7 +507,7 @@ void tree_kick(int rung, float dt, double* flops) {
 #define OTHERSMAX2 128
 
 __global__
-void tree_kick_ewald(int rung, float dt, double* flops) {
+void tree_kick_ewald(int rung, float dt, double* nactive) {
 	const int& tid = threadIdx.x;
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
@@ -545,6 +542,11 @@ void tree_kick_ewald(int rung, float dt, double* flops) {
 	if (myindex < leaf_count) {
 		int depth;
 		const tree& self = *(tree_base + leaf_list[myindex]);
+		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
+			if (p->rung >= rung) {
+				atomicAdd(nactive,1);
+			}
+		}
 		tree* pointers[MAXDEPTH];
 		int child_indexes[MAXDEPTH];
 		float self_r = self.pole.radius;
@@ -612,9 +614,6 @@ void tree_kick_ewald(int rung, float dt, double* flops) {
 			if (other_cnt >= OTHERSMAX2 || done) {
 				__syncthreads();
 				const tree& self = *(tree_base + leaf_list[myindex]);
-				if (tid == 0) {
-					atomicAdd(flops, double(128 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX2)));
-				}
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
 					if (sink->rung >= rung) {
 						const auto& sink_x = sink->x;
@@ -656,32 +655,11 @@ void tree_kick_ewald(int rung, float dt, double* flops) {
 		} while (!done);
 		const float GM = opts.particle_mass * opts.G;
 		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
-			for (int dim = 0; dim < NDIM; dim++) {
-				p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+			if (p->rung >= rung) {
+				for (int dim = 0; dim < NDIM; dim++) {
+					p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+				}
 			}
 		}
 	}
 }
-
-/*
-__device__
-void tree::kick(tree* root, int rung, float dt, cudaTextureObject_t* tex_ewald_) {
-	tex_ewald = tex_ewald_;
-	int blocks_needed = (leaf_count - 1) + 1;
-	int block_size = SQRT(float(blocks_needed -1 )) + 1;
-	assert(block_size * block_size >= leaf_count);
-	dim3 dim;
-	dim.x = dim.y = block_size;
-	dim.z = 1;
-	double* flops;
-	CUDA_CHECK(cudaMalloc(&flops, sizeof(double)));
-	*flops = 0.0;
-	tree_kick<<<dim,KICKWARPSIZE>>>(root, rung,dt, flops);
-	tree_kick_ewald<<<dim,KICKEWALDWARPSIZE>>>(root, rung,dt, flops);
-	CUDA_CHECK(cudaGetLastError());
-	CUDA_CHECK(cudaDeviceSynchronize());
-	printf("FLOPS = %e\n", *flops);
-	CUDA_CHECK(cudaFree(flops));
-
-}
-*/

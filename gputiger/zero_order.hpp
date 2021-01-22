@@ -27,6 +27,8 @@ struct zero_order_universe {
 	float scale_factor_to_conformal_time(float a);
 	__device__
 	float redshift_to_time(float z) const;
+	__device__
+	double redshift_to_density(double z) const;
 };
 
 __device__

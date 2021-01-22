@@ -4,6 +4,7 @@ template<class T>
 class fixed {
 	T i;
 	static constexpr float norm = 2.f * float(uint32_t(1) << uint32_t(31));
+	static constexpr float norminv = 1.f / norm;
 	static constexpr int mshift = 32;
 public:
 	fixed() = default;
@@ -14,58 +15,58 @@ public:
 	__device__ inline fixed(float r) {
 		*this = r;
 	}
-	__device__   inline fixed& operator=(float r) {
+	__device__    inline fixed& operator=(float r) {
 		i = T(r * norm);
 		return *this;
 	}
 	template<class V>
-	__device__   inline fixed& operator=(const fixed<V>& r) {
+	__device__    inline fixed& operator=(const fixed<V>& r) {
 		i = r.i;
 		return *this;
 	}
 
 	template<class V>
-	__device__   inline fixed(const fixed<V>& r) {
+	__device__ inline fixed(const fixed<V>& r) {
 		*this = r;
 	}
 
-	__device__   inline fixed& operator+=(const fixed& other) {
+	__device__    inline fixed& operator+=(const fixed& other) {
 		i += other.i;
 		return *this;
 	}
 
-	__device__   inline fixed& operator-=(const fixed& other) {
+	__device__    inline fixed& operator-=(const fixed& other) {
 		i -= other.i;
 		return *this;
 	}
 
-	__device__   inline fixed& operator*=(const fixed& other) {
+	__device__    inline fixed& operator*=(const fixed& other) {
 		i *= other.i;
 		i >>= mshift;
 		return *this;
 	}
 
-	__device__   inline fixed& operator/=(const fixed& other) {
+	__device__    inline fixed& operator/=(const fixed& other) {
 		i /= (other.i >> mshift);
 		return *this;
 	}
 
-	__device__   inline fixed operator+(const fixed& b) const {
+	__device__    inline fixed operator+(const fixed& b) const {
 		fixed c;
 		c.i = i + b.i;
 		return c;
 	}
-	__device__   inline fixed operator-(const fixed& b) const {
+	__device__    inline fixed operator-(const fixed& b) const {
 		fixed c;
 		c.i = i - b.i;
 		return c;
 	}
-	__device__   inline fixed operator*(const fixed& b) const {
+	__device__    inline fixed operator*(const fixed& b) const {
 		fixed c;
 		c.i = (i * b.i) >> mshift;
 		return c;
 	}
-	__device__   inline fixed operator/(const fixed& b) const {
+	__device__    inline fixed operator/(const fixed& b) const {
 		fixed c;
 		c.i = i / (b.i >> mshift);
 		return c;
@@ -122,7 +123,7 @@ public:
 
 	__device__
 	float ewald_dif(fixed other) {
-		return ((int32_t) i - (int32_t) other.i) / norm;
+		return ((int32_t) i - (int32_t) other.i) * norminv;
 	}
 
 };

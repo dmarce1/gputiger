@@ -71,6 +71,9 @@
 
 
 struct options {
+	double code_to_cm;
+	double code_to_g;
+	double code_to_s;
 	float redshift;
 	float G;
 	float particle_mass;

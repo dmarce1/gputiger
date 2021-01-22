@@ -15,6 +15,7 @@ constexpr double Tcmb = 2.73;
 constexpr double sigma_T = 6.6524587158e-25;
 constexpr double evtoK = 11604.5250061657;
 constexpr double seconds_to_years = 1.0 / (365.24*24*60*60);
+constexpr double mpc_to_cm = 3.086e24;
 }
 
 namespace cosmic_constants {

@@ -42,6 +42,17 @@ float zero_order_universe::conformal_time_to_scale_factor(float taumax) {
 	return a;
 }
 
+
+__device__
+double zero_order_universe::redshift_to_density(double z) const {
+	const double a = 1.0 / (1.0 + z);
+	const double omega_m = opts.omega_b + opts.omega_c;
+	const double omega_r = opts.omega_nu + opts.omega_gam;
+	const double omega_l = 1.0 - omega_m - omega_r;
+	const double H2 = pow2(opts.h * constants::H0) * (omega_r/(a*a*a*a)+omega_m/(a*a*a)+omega_l);
+	return omega_m * 3.0 * H2 / (8.0 * M_PI * constants::G);
+}
+
 __device__
 float zero_order_universe::scale_factor_to_conformal_time(float a) {
 	float amax = a;

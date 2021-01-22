@@ -66,7 +66,7 @@ __global__ void displacements_to_particles(cmplx* phi, particle* parts, int dim)
 }
 
 __device__
-           extern cudaTextureObject_t* tex_ewald;
+            extern cudaTextureObject_t* tex_ewald;
 
 __global__
 void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr) {
@@ -155,8 +155,18 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		printf("\tTransferring data back from host\n");
 		transfer_data<<<1,TRANSFERSIZE>>>(parts,host_parts);
 		CUDA_CHECK(cudaDeviceSynchronize());
+		double rho = zeroverse_ptr->redshift_to_density(opts.redshift);
+		double vol = pow(opts.box_size * constants::mpc_to_cm, 3);
+		double mpart = rho * vol / N3;
+		opts.code_to_g = constants::G * pow2(constants::c) * opts.box_size * constants::mpc_to_cm;
+		opts.code_to_cm = opts.box_size * constants::mpc_to_cm;
+		opts.code_to_s = pow(opts.code_to_cm,1.5)*pow(opts.code_to_g,-0.5);
 		printf("Initialization complete\n");
-
+		printf("\tParticle mass = %e g/cm^3\n", mpart);
+		printf("\t\tCode Units\n");
+		printf( "\t\t\tmass   = %e g\n", opts.code_to_g);
+		printf( "\t\t\tlength = %e cm\n", opts.code_to_cm);
+		printf( "\t\t\ttime   = %e s\n", opts.code_to_s);
 		CUDA_CHECK(cudaFree(zeroverse_ptr));
 		CUDA_CHECK(cudaFree(&result_ptr));
 		CUDA_CHECK(cudaFree(&func_ptr));

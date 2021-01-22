@@ -20,11 +20,12 @@ cudaTextureObject_t* host_ewald;
 #define KERNEL_DEPTH 13
 #define HEAP_SIZE (4*1024*1024)
 
-
 #define TREESORTSIZE 32
 
 int main() {
 	timer time;
+	timer kick_time;
+	timer sort_time;
 	size_t stack_size = STACK_SIZE;
 	size_t recur_limit = KERNEL_DEPTH;
 	size_t heap_size = HEAP_SIZE;
@@ -126,65 +127,33 @@ int main() {
 	initialize<<<1, 1>>>(arena, parts_ptr, opts, host_ewald);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
-	double* flops;
+	double* parts_processed;
 	double dt = 0.f;
 	int* leaf_count, rung = 0;
-	CUDA_MALLOC_MANAGED(&flops, sizeof(double));
+	CUDA_MALLOC_MANAGED(&parts_processed, sizeof(double));
 	CUDA_MALLOC_MANAGED(&leaf_count, sizeof(int));
 
-	printf("Entering main execution loop.\n");
+	printf("\nEntering main execution loop.\n");
 
-	time.start();
+	sort_time.start();
 	printf("\tSorting\n");
 	root_tree_sort<<<1,TREESORTSIZE>>>(arena + 8*sizeof(float)*N3, TREESPACE*sizeof(float)*N3, parts_ptr, (particle*) arena, leaf_count);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	printf("\t\tSort took %e seconds\n", time.stop());
+	printf("\t\tSort took %e seconds\n", sort_time.stop());
 
 	printf("\t\tKicking\n");
-	time.start();
+	kick_time.start();
 	int blocks_needed = (*leaf_count - 1) + 1;
 	int block_size = sqrtf(float(blocks_needed - 1)) + 1;
 	dim3 dim;
 	dim.x = dim.y = block_size;
 	dim.z = 1;
-	*flops = 0.0;
-	tree_kick<<<dim,KICKWARPSIZE>>>(rung,dt, flops);
-	tree_kick_ewald<<<dim,KICKEWALDWARPSIZE>>>(rung,dt, flops);
+	*parts_processed = 0.0;
+	tree_kick<<<dim,KICKWARPSIZE>>>(rung,dt, parts_processed);
+	tree_kick_ewald<<<dim,KICKEWALDWARPSIZE>>>(rung,dt, parts_processed);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	printf("\t\tKick took %e seconds\n", time.stop());
+	printf("\t\tKick took %e seconds\n", kick_time.stop());
+	printf("\tScience Rate = %e pps\n", *parts_processed / (kick_time.result() + sort_time.result()));
 
-	/*	 size_t stack_size;
-	 size_t desired_stack_size = 4 * 1024;
-	 size_t rlimit = KERNEL_DEPTH + 1;
-	 size_t heapsize = 4 * 1024 * 1024;
-	 CUDA_CHECK(cudaDeviceGetLimit(&rlimit, cudaLimitDevRuntimeSyncDepth));
-	 printf("CUDA recursion limit = %li\n", rlimit);
-	 CUDA_CHECK(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
-	 printf("heapsize = %li\n", heapsize / 1024 / 1024);
-	 //	CUDA_CHECK(cudaThreadSetCacheConfig(cudaFuncCachePreferShared));
-	 printf("Stack Size = %li\n", stack_size);
-
-	 struct cudaDeviceProp prop;
-	 CUDA_CHECK(cudaGetDeviceProperties(&prop, 0));
-	 opts.clock_rate = prop.clockRate * pow(1024 / 1000, 3) * 1000;
-	 printf("Clock rate = %e\n", opts.clock_rate);
-
-
-	 CUDA_CHECK(cudaMallocManaged(&parts_ptr, sizeof(particle) * N3));
-	 size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
-	 printf("Allocating arena of %li Mbytes\n", (arena_size / 1024 / 1024));
-	 CUDA_CHECK(cudaMallocManaged(&arena, arena_size));
-	 if (arena == nullptr) {
-	 printf("Not enough memory\n");
-	 abort();
-	 }
-	 main_kernel<<<1, BLOCK_SIZE>>>(arena, parts_ptr, opts, host_ewald);
-	 CUDA_CHECK(cudaGetLastError());
-
-	 CUDA_CHECK(cudaDeviceSynchronize());
-	 CUDA_CHECK(cudaFree(arena));
-	 CUDA_CHECK(cudaFree(parts_ptr));
-	 CUDA_CHECK(cudaFree(etable));
-	 CUDA_CHECK(cudaFree(host_ewald));
-	 */
+	return 0;
 }
