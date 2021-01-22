@@ -238,7 +238,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Sorting\n");
-		root_tree_sort<<<1,2*WARPSIZE>>>(root, host_parts, parts, parts+N3, root_range, 0);
+		root_tree_sort<<<1,MAXTHREADCOUNT>>>(root, host_parts, parts, parts+N3, root_range, 0);
 		CUDA_CHECK(cudaGetLastError());
 	}
 	__syncthreads();
