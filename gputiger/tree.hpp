@@ -11,6 +11,7 @@
 #include <gputiger/particle.hpp>
 #include <gputiger/range.hpp>
 #include <gputiger/monopole.hpp>
+#include <gputiger/ewald.hpp>
 
 struct tree;
 /*
@@ -43,7 +44,7 @@ struct tree {
 	bool leaf;
 
 	__device__
-	static void initialize(particle* parts, void* arena, size_t bytes);
+	static void initialize(particle* parts, void* arena, size_t bytes, ewald_table_t* etable);
 	__device__
 	  static tree* alloc();
 	__device__

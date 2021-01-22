@@ -79,10 +79,12 @@ void compute_ewald_table(ewald_table_t* table) {
 			fx = fy = fz = 0.f;
 		}
 		__syncthreads();
-		(*table)[index][0] = fx;
-		(*table)[index][1] = fy;
-		(*table)[index][2] = fz;
-		(*table)[index][3] = phi;
+		(*table)[0][index] = fx;
+		(*table)[1][index] = fy;
+		(*table)[2][index] = fz;
+		(*table)[3][index] = phi;
 		__syncthreads();
 	}
+
+
 }

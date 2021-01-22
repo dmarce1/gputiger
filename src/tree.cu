@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                   static tree* tree_base;
+                                                                                                                        static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,7 +20,11 @@ __device__
 static int leaf_count;
 
 __device__
-void tree::initialize(particle* parts, void* data, size_t bytes) {
+     static ewald_table_t* etable;
+
+__device__
+void tree::initialize(particle* parts, void* data, size_t bytes, ewald_table_t* etable_) {
+	etable = etable_;
 	int sztot = sizeof(tree) + sizeof(int);
 	int N = bytes / sztot;
 	printf("Allocating space for %i trees\n", N);
@@ -240,13 +244,15 @@ __device__ monopole tree::sort(particle* swap_space, particle* pbegin, particle*
 
 #define KICKWARPSIZE 32
 
+#define KICKEWALDWARPSIZE 32
+
 struct direct_t {
 	const tree* self;
 	const tree* other;
 };
 
-#define PARTMAX 128
-#define OTHERSMAX (256)
+#define PARTMAX 64
+#define OTHERSMAX 256
 
 __global__
 void tree_kick(tree* root, int rung, float dt, double* flops) {
@@ -255,6 +261,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	const int& xi = blockIdx.y;
 	const int myindex = (gridDim.x * xi + yi);
 	__shared__ float h2;
+	__shared__ float dewald;
 	bool opened;
 	__shared__ array<array<float, NDIM>, PARTMAX> F;
 	__shared__ array<array<fixed32, NDIM>, OTHERSMAX> others1;
@@ -269,6 +276,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		next_others = others2.data();
 		other_cnt = 0;
 		h2 = opts.hsoft * opts.hsoft;
+		dewald = EWALD_DIM - 1.0f;
 	}
 	__syncthreads();
 	int ndirect = 0;
@@ -284,18 +292,20 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		const tree& self = *(tree_base + leaf_list[myindex]);
 		tree* pointers[MAXDEPTH];
 		int child_indexes[MAXDEPTH];
-		for (int i = 0; i < MAXDEPTH; i++) {
-			child_indexes[i] = 0;
-		}
-		pointers[0] = root;
-		depth = 0;
-		bool done = false;
 		float self_w = 0.f;
+		bool done;
 		for (int dim = 0; dim < NDIM; dim++) {
 			self_w += POW(self.box.end[dim] - self.box.begin[dim], 2);
 		}
 		self_w = SQRT(self_w) / float(2);
 		array<fixed32, NDIM> self_x = self.pole.xcom;
+
+		done = false;
+		for (int i = 0; i < MAXDEPTH; i++) {
+			child_indexes[i] = 0;
+		}
+		pointers[0] = root;
+		depth = 0;
 		do {
 			const auto& other = *pointers[depth];
 			array<fixed32, NDIM> other_x = other.pole.xcom;
@@ -402,6 +412,194 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 	}
 }
 
+
+#define OTHERSMAX2 128
+
+__global__
+void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
+	const int& tid = threadIdx.x;
+	const int& yi = blockIdx.x;
+	const int& xi = blockIdx.y;
+	const int myindex = (gridDim.x * xi + yi);
+	__shared__ float h2;
+	__shared__ float dewald;
+	bool opened;
+	__shared__ array<array<float, NDIM>, PARTMAX> F;
+	__shared__ array<array<fixed32, NDIM>, OTHERSMAX2> others1;
+	__shared__ array<array<fixed32, NDIM>, OTHERSMAX2> others2;
+	__shared__ bool swtch;
+	__shared__ array<fixed32, NDIM>* others;
+	__shared__ array<fixed32, NDIM>* next_others;
+	__shared__ int other_cnt;
+	if (tid == 0) {
+		swtch = false;
+		others = others1.data();
+		next_others = others2.data();
+		other_cnt = 0;
+		h2 = opts.hsoft * opts.hsoft;
+		dewald = EWALD_DIM - 1.0f;
+	}
+	__syncthreads();
+	int ndirect = 0;
+	int nindirect = 0;
+	for (int i = tid; i < PARTMAX; i += KICKWARPSIZE) {
+		for (int dim = 0; dim < NDIM; dim++) {
+			F[i][dim] = float(0);
+		}
+	}
+	__syncthreads();
+	if (myindex < leaf_count) {
+		int depth;
+		const tree& self = *(tree_base + leaf_list[myindex]);
+		tree* pointers[MAXDEPTH];
+		int child_indexes[MAXDEPTH];
+		float self_w = 0.f;
+		bool done;
+		for (int dim = 0; dim < NDIM; dim++) {
+			self_w += POW(self.box.end[dim] - self.box.begin[dim], 2);
+		}
+		self_w = SQRT(self_w) / float(2);
+		array<fixed32, NDIM> self_x = self.pole.xcom;
+
+		done = false;
+		for (int i = 0; i < MAXDEPTH; i++) {
+			child_indexes[i] = 0;
+		}
+		pointers[0] = root;
+		depth = 0;
+		do {
+			const auto& other = *pointers[depth];
+			array<fixed32, NDIM> other_x = other.pole.xcom;
+			float other_w = 0.0f;
+			for (int dim = 0; dim < NDIM; dim++) {
+				other_w += pow2(other.box.end[dim] - other.box.begin[dim]);
+			}
+			other_w = SQRT(other_w) / 2.f;
+			float dist2 = 0.f;
+			float dist;
+			for (int dim = 0; dim < NDIM; dim++) {
+				dist = max(0.25, self_x[dim].ewald_dif(other_x[dim]));
+				dist2 += dist * dist;
+			}
+			dist = SQRT(dist2);
+			opened = (self_w + other_w) > opts.opening_crit * dist;
+			assert(!(!opened && depth == 0));
+			__syncthreads();
+			if (opened && other.leaf) {
+				ndirect++;
+				for (auto* source = other.part_begin + tid; source < other.part_end; source += KICKWARPSIZE) {
+					const auto source_x = source->x;
+					int index = atomicAdd(&other_cnt, 1);
+					if (index < OTHERSMAX2) {
+						others[index] = source_x;
+					} else {
+						next_others[index - OTHERSMAX2] = source_x;
+					}
+				}
+			} else {
+				if (tid == 0) {
+					others[other_cnt++] = other_x;
+				}
+				nindirect++;
+			}
+			__syncthreads();
+			if (!opened || pointers[depth]->leaf) {
+				child_indexes[depth] = 0;
+				depth--;
+				while (depth && child_indexes[depth] == NCHILD - 1) {
+					child_indexes[depth] = 0;
+					depth--;
+				}
+				child_indexes[depth]++;
+			}
+			if (!(child_indexes[0] == NCHILD)) {
+				depth++;
+				assert(child_indexes[depth - 1] < NCHILD);
+				assert(child_indexes[depth - 1] >= 0);
+				assert(depth < MAXDEPTH);
+				assert(depth >= 0);
+				pointers[depth] = pointers[depth - 1]->children[child_indexes[depth - 1]];
+			} else {
+				done = true;
+			}
+			__syncthreads();
+			if (other_cnt >= OTHERSMAX2 || done) {
+				__syncthreads();
+				const tree& self = *(tree_base + leaf_list[myindex]);
+				if (tid == 0) {
+					atomicAdd(flops, double(42 * (self.part_end - self.part_begin) * min(other_cnt, OTHERSMAX2)));
+				}
+				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
+					const auto& sink_x = sink->x;
+					const int count = min(other_cnt, OTHERSMAX2);
+					for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
+						array<float, NDIM> X;
+						array<float, NDIM> absX;
+						const auto& source_x = others[oi];
+						for (int dim = 0; dim < NDIM; dim++) {
+							X[dim] = source_x[dim].ewald_dif(sink_x[dim]);
+							absX[dim] = abs(X[dim]);
+							const int x = absX[0] * dewald;
+							const int y = absX[1] * dewald;
+							const int z = absX[2] * dewald;
+							const int xi0 = x;
+							const int yi0 = y;
+							const int zi0 = z;
+							const int xi1 = xi0 + 1;
+							const int yi1 = yi0 + 1;
+							const int zi1 = zi0 + 1;
+							const float wx0 = x - xi0;
+							const float wy0 = y - yi0;
+							const float wz0 = z - zi0;
+							const float wx1 = 1.f - wx0;
+							const float wy1 = 1.f - wy0;
+							const float wz1 = 1.f - wz0;
+							const float wy1wz1 = wy1 * wz1;
+							const float wy1wz0 = wy1 * wz0;
+							const float wy0wz1 = wy0 * wz1;
+							const float wy0wz0 = wy0 * wz0;
+							const float w000 = wx1 * wy1wz1;
+							const float w001 = wx1 * wy1wz0;
+							const float w010 = wx1 * wy0wz1;
+							const float w011 = wx1 * wy0wz0;
+							const float w100 = wx0 * wy1wz1;
+							const float w101 = wx0 * wy1wz0;
+							const float w110 = wx0 * wy0wz1;
+							const float w111 = wx0 * wy0wz0;
+							const int index = sink - self.part_begin;
+							for (int dim = 0; dim < NDIM; dim++) {
+								const float sgn = copysign(1.f, X[dim]);
+								F[index][dim] += w000 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi0];
+								F[index][dim] += w001 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi1];
+								F[index][dim] += w010 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi0];
+								F[index][dim] += w011 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi1];
+								F[index][dim] += w100 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi0];
+								F[index][dim] += w101 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi1];
+								F[index][dim] += w110 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi0];
+								F[index][dim] += w111 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi1];
+							}
+
+						}
+					}
+				}
+				__syncthreads();
+				if (tid == 0) {
+					other_cnt -= OTHERSMAX2;
+					swtch = !swtch;
+					if (swtch) {
+						others = others2.data();
+						next_others = others1.data();
+					} else {
+						others = others1.data();
+						next_others = others2.data();
+					}
+				}
+				__syncthreads();
+			}
+		} while (!done);
+	}
+}
+
 __device__
 void tree::kick(tree* root, int rung, float dt) {
 	int blocks_needed = (leaf_count - 1) + 1;
@@ -414,6 +612,7 @@ void tree::kick(tree* root, int rung, float dt) {
 	CUDA_CHECK(cudaMalloc(&flops, sizeof(double)));
 	*flops = 0.0;
 	tree_kick<<<dim,KICKWARPSIZE>>>(root, rung,dt, flops);
+	tree_kick_ewald<<<dim,KICKEWALDWARPSIZE>>>(root, rung,dt, flops);
 	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaDeviceSynchronize());
 	printf("FLOPS = %e\n", *flops);

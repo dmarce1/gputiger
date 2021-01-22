@@ -226,7 +226,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_) {
 	__syncthreads();
 	if (thread == 0) {
 		printf("Begining non-linear evolution\n");
-		tree::initialize(parts, arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * TREESPACE);
+		tree::initialize(parts, arena + N3 * sizeof(float) * 8, N3 * sizeof(float) * TREESPACE, etable);
 		CUDA_CHECK(cudaMalloc(&root, sizeof(tree)));
 	}
 	__syncthreads();
