@@ -569,14 +569,14 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 							const int index = sink - self.part_begin;
 							for (int dim = 0; dim < NDIM; dim++) {
 								const float sgn = copysign(1.f, X[dim]);
-								F[index][dim] += w000 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi0];
-								F[index][dim] += w001 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi1];
-								F[index][dim] += w010 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi0];
-								F[index][dim] += w011 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi1];
-								F[index][dim] += w100 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi0];
-								F[index][dim] += w101 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi1];
-								F[index][dim] += w110 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi0];
-								F[index][dim] += w111 * (*etable)[dim][EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi1];
+								F[index][dim] += w000 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi0][dim];
+								F[index][dim] += w001 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi0) + zi1][dim];
+								F[index][dim] += w010 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi0][dim];
+								F[index][dim] += w011 * (*etable)[EWALD_DIM * (EWALD_DIM * xi0 + yi1) + zi1][dim];
+								F[index][dim] += w100 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi0][dim];
+								F[index][dim] += w101 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi0) + zi1][dim];
+								F[index][dim] += w110 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi0][dim];
+								F[index][dim] += w111 * (*etable)[EWALD_DIM * (EWALD_DIM * xi1 + yi1) + zi1][dim];
 							}
 
 						}
