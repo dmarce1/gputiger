@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                          static tree* tree_base;
+                                                                                                                               static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,10 +20,10 @@ __device__
 static int leaf_count;
 
 __device__
-       static ewald_table_t* etable;
+            static ewald_table_t* etable;
 
 __device__
-  static cudaTextureObject_t* tex_ewald;
+       static cudaTextureObject_t* tex_ewald;
 
 __device__
 void tree::initialize(particle* parts, void* data, size_t bytes, ewald_table_t* etable_) {
@@ -110,6 +110,7 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 	const int tid = threadIdx.x;
 	//const int block_size = blockDim.x;
 	__shared__ array<array<fixed64, NDIM>, WARPSIZE> poles;
+	__shared__ array<float, WARPSIZE> radii;
 	if (tid == 0) {
 		if (depth_ >= MAXDEPTH) {
 			printf("Maximum depth exceeded in sort\n");
@@ -188,13 +189,86 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 		if (tid == 0) {
 			pole.count = children[0]->pole.count + children[1]->pole.count;
 			for (int dim = 0; dim < NDIM; dim++) {
-				auto p0 = (children[0]->pole.count) * (children[0]->pole.xcom[dim].to_float());
-				auto p1 = (children[1]->pole.count) * (children[1]->pole.xcom[dim].to_float());
+				auto p0 = (children[0]->pole.count) * (children[0]->pole.xcom[dim].to_double());
+				auto p1 = (children[1]->pole.count) * (children[1]->pole.xcom[dim].to_double());
 				p0 += p1;
 				p0 /= pole.count;
 				pole.xcom[dim] = p0;
-//				printf( "%e\n", p0.to_float());
 			}
+			double r0 = 0.0;
+			for (int dim = 0; dim < NDIM; dim++) {
+				r0 += pow2(children[0]->pole.xcom[dim].to_double() - pole.xcom[dim].to_double());
+			}
+			r0 = max(children[0]->pole.radius, children[1]->pole.radius) + sqrt(r0);
+			double r1 = 0.0;
+			double r2 = 0.0;
+			array<double, NDIM> corner;
+			corner[0] = box.begin[0];
+			corner[1] = box.begin[1];
+			corner[2] = box.begin[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double()- corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r1 = 0.0;
+			corner[0] = box.end[0];
+			corner[1] = box.begin[1];
+			corner[2] = box.begin[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double()- corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r1 = 0.0;
+			corner[0] = box.begin[0];
+			corner[1] = box.end[1];
+			corner[2] = box.begin[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r1 = 0.0;
+			corner[0] = box.end[0];
+			corner[1] = box.end[1];
+			corner[2] = box.begin[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
+			}
+			r2 = r1;
+			r1 = 0.0;
+			corner[0] = box.begin[0];
+			corner[1] = box.begin[1];
+			corner[2] = box.end[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r1 = 0.0;
+			corner[0] = box.end[0];
+			corner[1] = box.begin[1];
+			corner[2] = box.end[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r1 = 0.0;
+			corner[0] = box.begin[0];
+			corner[1] = box.end[1];
+			corner[2] = box.end[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r1 = 0.0;
+			corner[0] = box.end[0];
+			corner[1] = box.end[1];
+			corner[2] = box.end[2];
+			for (int dim = 0; dim < NDIM; dim++) {
+				r1 += pow2(pole.xcom[dim].to_double() - corner[dim]);
+			}
+			r2 = max(r1, r2);
+			r2 = sqrt(r2);
+			r0 = min(r2, r0);
+			pole.radius = r0;
 		}
 		__syncthreads();
 	} else {
@@ -239,6 +313,27 @@ __device__ monopole tree::sort(particle* swap_space, int depth_) {
 				}
 			}
 		}
+		__syncthreads();
+		if (tid < WARPSIZE) {
+			radii[tid] = 0.f;
+			for (particle* p = part_begin + tid; p < part_end; p += WARPSIZE) {
+				float r = 0.f;
+				for (int dim = 0; dim < NDIM; dim++) {
+					double d = p->x[dim].to_double() - pole.xcom[dim].to_double();
+					r += pow2(d);
+				}
+				radii[tid] = fmaxf(radii[tid], r);
+			}
+		}
+		__syncthreads();
+		for (int P = WARPSIZE / 2; P >= 1; P /= 2) {
+			if (tid < P) {
+				radii[tid] = fmaxf(radii[tid], radii[tid + P]);
+			}
+			__syncthreads();
+		}
+		pole.radius = sqrtf(radii[0]);
+//		printf( "%e\n", pole.radius);
 		__syncthreads();
 	}
 //	if (tid == 0 && !leaf)
@@ -296,12 +391,8 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		const tree& self = *(tree_base + leaf_list[myindex]);
 		tree* pointers[MAXDEPTH];
 		int child_indexes[MAXDEPTH];
-		float self_w = 0.f;
+		float self_r = self.pole.radius;
 		bool done;
-		for (int dim = 0; dim < NDIM; dim++) {
-			self_w += POW(self.box.end[dim] - self.box.begin[dim], 2);
-		}
-		self_w = SQRT(self_w) / float(2);
 		array<fixed32, NDIM> self_x = self.pole.xcom;
 
 		done = false;
@@ -313,11 +404,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 		do {
 			const auto& other = *pointers[depth];
 			array<fixed32, NDIM> other_x = other.pole.xcom;
-			float other_w = 0.0f;
-			for (int dim = 0; dim < NDIM; dim++) {
-				other_w += pow2(other.box.end[dim] - other.box.begin[dim]);
-			}
-			other_w = SQRT(other_w) / 2.f;
+			float other_r = other.pole.radius;
 			float dist2 = 0.f;
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -325,7 +412,7 @@ void tree_kick(tree* root, int rung, float dt, double* flops) {
 				dist2 += dist * dist;
 			}
 			dist = SQRT(dist2);
-			opened = (self_w + other_w) > opts.opening_crit * dist;
+			opened = (self_r + other_r) > opts.opening_crit * dist;
 			assert(!(!opened && depth == 0));
 			__syncthreads();
 			if (opened && other.leaf) {
@@ -456,12 +543,8 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 		const tree& self = *(tree_base + leaf_list[myindex]);
 		tree* pointers[MAXDEPTH];
 		int child_indexes[MAXDEPTH];
-		float self_w = 0.f;
+		float self_r = self.pole.radius;
 		bool done;
-		for (int dim = 0; dim < NDIM; dim++) {
-			self_w += POW(self.box.end[dim] - self.box.begin[dim], 2);
-		}
-		self_w = SQRT(self_w) / float(2);
 		array<fixed32, NDIM> self_x = self.pole.xcom;
 
 		done = false;
@@ -473,11 +556,7 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 		do {
 			const auto& other = *pointers[depth];
 			array<fixed32, NDIM> other_x = other.pole.xcom;
-			float other_w = 0.0f;
-			for (int dim = 0; dim < NDIM; dim++) {
-				other_w += pow2(other.box.end[dim] - other.box.begin[dim]);
-			}
-			other_w = SQRT(other_w) / 2.f;
+			float other_r = other.pole.radius;
 			float dist2 = 0.f;
 			float dist;
 			for (int dim = 0; dim < NDIM; dim++) {
@@ -485,7 +564,7 @@ void tree_kick_ewald(tree* root, int rung, float dt, double* flops) {
 				dist2 += dist * dist;
 			}
 			dist = SQRT(dist2);
-			opened = (self_w + other_w) > opts.opening_crit * dist;
+			opened = (self_r + other_r) > opts.opening_crit * dist;
 			assert(!(!opened && depth == 0));
 			__syncthreads();
 			if (opened && other.leaf) {

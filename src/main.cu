@@ -262,7 +262,7 @@ void main_kernel(void* arena, particle* host_parts, options opts_, cudaTextureOb
 
 cudaTextureObject_t* host_ewald;
 
-#define KERNEL_DEPTH 13
+#define KERNEL_DEPTH 12
 int main() {
 
 	options opts;
@@ -302,7 +302,7 @@ int main() {
 	opts.nout = 64;
 	opts.max_kernel_depth = KERNEL_DEPTH;
 	opts.parts_per_bucket = 64;
-	opts.opening_crit = 0.7;
+	opts.opening_crit = 0.5;
 	opts.nparts = opts.Ngrid * opts.Ngrid * opts.Ngrid;
 	opts.hsoft = opts.Ngrid / 50.0;
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma

@@ -7,6 +7,7 @@
 
 struct monopole {
 	int count;
+	float radius;
 	array<fixed32,NDIM> xcom;
 };
 

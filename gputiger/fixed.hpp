@@ -18,11 +18,15 @@ public:
 		i = T(r * norm);
 		return *this;
 	}
+	template<class V>
+	__device__   inline fixed& operator=(const fixed<V>& r) {
+		i = r.i;
+		return *this;
+	}
 
 	template<class V>
-	__device__   inline fixed& operator=(const fixed<V>& other) {
-		i = other.i;
-		return *this;
+	__device__   inline fixed(const fixed<V>& r) {
+		*this = r;
 	}
 
 	__device__   inline fixed& operator+=(const fixed& other) {
@@ -70,6 +74,11 @@ public:
 	__device__ inline
 	float to_float() const {
 		return float(i) / norm;
+	}
+
+	__device__ inline
+	double to_double() const {
+		return double(i) / norm;
 	}
 
 	template<class >
