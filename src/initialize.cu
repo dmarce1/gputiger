@@ -66,10 +66,11 @@ __global__ void displacements_to_particles(cmplx* phi, particle* parts, int dim)
 }
 
 __device__
-            extern cudaTextureObject_t* tex_ewald;
+                 extern cudaTextureObject_t* tex_ewald;
 
 __global__
-void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr, float* matterpow, float* velpow) {
+void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr, float* matterpow,
+		float* velpow) {
 	const int tid = threadIdx.x;
 	if (tid == 0) {
 		tex_ewald = ewald_ptr;
@@ -80,11 +81,7 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		cmplx* phi = (cmplx*) arena;
 		cmplx* rands = ((cmplx*) arena) + N3;
 		particle* parts = (particle*) arena;
-		float kmin;
-		float kmax;
 		float dk;
-		float kmin0;
-		float kmax0;
 		float vmax, xdisp;
 		float normalization;
 		float *result_ptr;
@@ -95,20 +92,9 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		cos_state* states;
 		cmplx* basis;
 
-		kmin = 2.0 * (float) M_PI / opts.box_size;
-		kmax = sqrtf(3) * (kmin * (float) (opts.Ngrid));
-		kmin0 = (1e-4 * opts.h);
-		kmax0 = (5 * opts.h);
-		dk = min(logf(kmax/kmin), 5/(1e-4)) / opts.Ngrid;
-		kmin = min(kmin0,kmin);
-		kmax = max(kmax0,kmax);
-		int Nk = fmaxf(logf(kmax/kmin) / dk + 1, (float) opts.Nmp);
-
-
 		CUDA_MALLOC(&zeroverse_ptr, sizeof(zero_order_universe));
 		CUDA_MALLOC(&result_ptr, sizeof(float));
 		CUDA_MALLOC(&func_ptr, sizeof(sigma8_integrand));
-		CUDA_MALLOC(&states, sizeof(cos_state) * Nk);
 		CUDA_MALLOC(&basis, sizeof(cmplx) * opts.Ngrid / 2);
 		CUDA_MALLOC(&den_k, sizeof(interp_functor<float> ));
 		CUDA_MALLOC(&vel_k, sizeof(interp_functor<float> ));
@@ -119,26 +105,38 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
 		integrate<sigma8_integrand, float> <<<1, SIGMA8SIZE>>>(func_ptr,
-				(float) LOG(0.25 / 128 * opts.h), (float) LOG(0.25 * 65 * opts.h), result_ptr, (float) 1.0e-6);
+				(float) LOG(1.e-4 * opts.h), (float) LOG(5 * opts.h), result_ptr, (float) 1.0e-6);
 		CUDA_CHECK(cudaDeviceSynchronize());
 		*result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
 		normalization = *result_ptr;
 		printf("\t\t\The normalization value is %e\n", *result_ptr);
 
-		const float ainit = 1.0f / (opts.redshift + 1.0f);
-		printf("\tComputing Einstain-Boltzmann interpolation solutions for wave numbers %e to %e Mpc^-1\n", kmin, kmax,
-				opts.Ngrid, opts.box_size);
+		printf("\tComputing Einstain-Boltzmann interpolation solutions for power.dat\n");
+		int Nk = 100;
+		CUDA_MALLOC(&states, sizeof(cos_state) * Nk);
+		float kmin = (1e-4 * opts.h);
+		float kmax = (5 * opts.h);
+		dk = logf(kmax / kmin) / (Nk - 1);
 		int block_size = max(EBSIZE, Nk);
-		einstein_boltzmann_interpolation_function<<<1, block_size>>>(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, normalization, Nk, zeroverse_ptr->amin, ainit);
+		einstein_boltzmann_interpolation_function<<<1, block_size>>>(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, normalization, Nk, zeroverse_ptr->amin, 1.f);
 		CUDA_CHECK(cudaDeviceSynchronize());
 
-		Nk = opts.Nmp;
-		dk = logf(kmax0/kmin0) / (Nk-1);
-		for( int i = 0; i < Nk; i++) {
-			float logk = log(kmin0) + i * dk;
+		for (int i = 0; i < Nk; i++) {
+			float logk = log(kmin) + i * dk;
 			matterpow[i] = (*den_k)(expf(logk));
 			velpow[i] = (*vel_k)(expf(logk));
 		}
+
+		kmin = 2.0 * (float) M_PI / opts.box_size;
+		kmax = sqrtf(3) * (kmin * (float) (opts.Ngrid));
+		printf("\tComputing Einstain-Boltzmann interpolation solutions for wave numbers %e to %e Mpc^-1\n", kmin, kmax);
+		Nk = 2 * opts.Ngrid;
+		CUDA_CHECK(cudaFree(&states));
+		CUDA_MALLOC(&states, sizeof(cos_state) * Nk);
+		const float ainit = 1.0f / (opts.redshift + 1.0f);
+		block_size = max(EBSIZE, Nk);
+		einstein_boltzmann_interpolation_function<<<1, block_size>>>(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, normalization, Nk, zeroverse_ptr->amin, ainit);
+		CUDA_CHECK(cudaDeviceSynchronize());
 
 		printf("\tComputing FFT basis\n");
 		fft_basis<<<1,FFTSIZE>>>(basis, opts.Ngrid);
@@ -179,13 +177,13 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		double mpart = rho * vol / N3;
 		opts.code_to_g = constants::G * pow2(constants::c) * opts.box_size * constants::mpc_to_cm;
 		opts.code_to_cm = opts.box_size * constants::mpc_to_cm;
-		opts.code_to_s = pow(opts.code_to_cm,1.5)*pow(opts.code_to_g,-0.5);
+		opts.code_to_s = pow(opts.code_to_cm, 1.5) * pow(opts.code_to_g, -0.5);
 		printf("Initialization complete\n");
 		printf("\tParticle mass = %e g/cm^3\n", mpart);
 		printf("\t\tCode Units\n");
-		printf( "\t\t\tmass   = %e g\n", opts.code_to_g);
-		printf( "\t\t\tlength = %e cm\n", opts.code_to_cm);
-		printf( "\t\t\ttime   = %e s\n", opts.code_to_s);
+		printf("\t\t\tmass   = %e g\n", opts.code_to_g);
+		printf("\t\t\tlength = %e cm\n", opts.code_to_cm);
+		printf("\t\t\ttime   = %e s\n", opts.code_to_s);
 		CUDA_CHECK(cudaFree(zeroverse_ptr));
 		CUDA_CHECK(cudaFree(&result_ptr));
 		CUDA_CHECK(cudaFree(&func_ptr));

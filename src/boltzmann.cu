@@ -233,6 +233,7 @@ void einstein_boltzmann_interpolation_function(interp_functor<float>* den_k_func
 		float eps = k / (astop * H);
 		einstein_boltzmann(U + i, uni, k, astart, astop);
 		den_k[i] = pow2(ob * U[i][deltabi] + oc * U[i][deltaci]);
+//		printf( "%e %e\n", k, den_k[i]);
 		vel_k[i] = pow2(
 				(ob * (eps * U[i][thetabi] + (float) 0.5 * U[i][hdoti]) + oc * ((float) 0.5 * U[i][hdoti])) / k * H);
 	}
