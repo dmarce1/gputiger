@@ -44,4 +44,8 @@ void root_tree_sort(void* dataspace, int space_size, particle* swap_space, parti
 __global__
 void tree_kick(int rung, float dt, float scale, int*, int*);
 
+__global__
+void tree_drift(particle* parts, double ainv, double dt);
+
+
 #endif /* TREE_HPP_ */

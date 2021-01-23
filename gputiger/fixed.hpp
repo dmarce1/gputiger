@@ -12,15 +12,19 @@ public:
 	fixed(fixed&&) = default;
 	fixed& operator=(const fixed&) = default;
 	fixed& operator=(fixed&&) = default;
+	__device__ inline void set(double r) {
+		i = T(r * norm);
+	}
+
 	__device__ inline fixed(float r) {
 		*this = r;
 	}
-	__device__    inline fixed& operator=(float r) {
+	__device__     inline fixed& operator=(float r) {
 		i = T(r * norm);
 		return *this;
 	}
 	template<class V>
-	__device__    inline fixed& operator=(const fixed<V>& r) {
+	__device__     inline fixed& operator=(const fixed<V>& r) {
 		i = r.i;
 		return *this;
 	}
@@ -30,43 +34,43 @@ public:
 		*this = r;
 	}
 
-	__device__    inline fixed& operator+=(const fixed& other) {
+	__device__     inline fixed& operator+=(const fixed& other) {
 		i += other.i;
 		return *this;
 	}
 
-	__device__    inline fixed& operator-=(const fixed& other) {
+	__device__     inline fixed& operator-=(const fixed& other) {
 		i -= other.i;
 		return *this;
 	}
 
-	__device__    inline fixed& operator*=(const fixed& other) {
+	__device__     inline fixed& operator*=(const fixed& other) {
 		i *= other.i;
 		i >>= mshift;
 		return *this;
 	}
 
-	__device__    inline fixed& operator/=(const fixed& other) {
+	__device__     inline fixed& operator/=(const fixed& other) {
 		i /= (other.i >> mshift);
 		return *this;
 	}
 
-	__device__    inline fixed operator+(const fixed& b) const {
+	__device__     inline fixed operator+(const fixed& b) const {
 		fixed c;
 		c.i = i + b.i;
 		return c;
 	}
-	__device__    inline fixed operator-(const fixed& b) const {
+	__device__     inline fixed operator-(const fixed& b) const {
 		fixed c;
 		c.i = i - b.i;
 		return c;
 	}
-	__device__    inline fixed operator*(const fixed& b) const {
+	__device__     inline fixed operator*(const fixed& b) const {
 		fixed c;
 		c.i = (i * b.i) >> mshift;
 		return c;
 	}
-	__device__    inline fixed operator/(const fixed& b) const {
+	__device__     inline fixed operator/(const fixed& b) const {
 		fixed c;
 		c.i = i / (b.i >> mshift);
 		return c;

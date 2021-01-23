@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                                          static tree* tree_base;
+                                                                                                                                               static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,7 +20,7 @@ __device__
 static int leaf_count;
 
 __device__
-                       static ewald_table_t* etable;
+                            static ewald_table_t* etable;
 
 __device__ cudaTextureObject_t* tex_ewald;
 
@@ -599,18 +599,39 @@ void tree_kick(int rung, float dt, float scale, int* nactive, int* maxrung) {
 		} while (!done);
 		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
 			if (p->rung >= rung) {
+				float dt0 = 0.5f / (1 << p->rung);
 				const auto &f = F[p - self.part_begin];
 				float fmag2 = 0.f;
 				atomicAdd(nactive, 1);
 				for (int dim = 0; dim < NDIM; dim++) {
-					const float this_f = f[dim];
-					p->v[dim] += GM * this_f * dt;
-					fmag2 += this_f * this_f;
+					fmag2 += pow2(f[dim]);
 				}
 				const float dt = sqrtah * powf(fmag2, -0.25);
 				p->rung = max(-int(logf(dt) * log2inv + 1.0), min(p->rung - 1, rung));
-				atomicMax(maxrung,p->rung);
+				float dt1 = 0.5f / (1 << p->rung);
+				for (int dim = 0; dim < NDIM; dim++) {
+					p->v[dim] += GM * f[dim] * (dt1 + dt0);
+				}
+				atomicMax(maxrung, p->rung);
 			}
+		}
+	}
+}
+
+__global__
+void tree_drift(particle* parts, double ainv, double dt) {
+	const int& tid = threadIdx.x;
+	const int& bid = blockIdx.x;
+	const int& bsz = blockDim.x;
+	const int& gsz = gridDim.x;
+	const int Npart = opts.Ngrid * opts.Ngrid * opts.Ngrid;
+	const int beg = (int64_t) bid * (int64_t) Npart / (int64_t) gsz;
+	const int end = (int64_t) (bid + 1) * (int64_t) Npart / (int64_t) gsz;
+	for (int i = beg + tid; i < end; i += bsz) {
+		for (int dim = 0; dim < NDIM; dim++) {
+			double x = parts[i].x[dim].to_double();
+			x += ainv * dt * parts[i].v[dim];
+			parts[i].x[dim].set(x);
 		}
 	}
 }
