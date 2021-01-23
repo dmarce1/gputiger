@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                                               static tree* tree_base;
+                                                                                                                                                 static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,7 +20,7 @@ __device__
 static int leaf_count;
 
 __device__
-                            static ewald_table_t* etable;
+                              static ewald_table_t* etable;
 
 __device__ cudaTextureObject_t* tex_ewald;
 
@@ -353,7 +353,7 @@ struct direct_t {
 #define OTHERSMAX 256
 
 __global__
-void tree_kick(int rung, float dt, float scale, int* nactive, int* maxrung) {
+void tree_kick(int rung, float scale, int* nactive, int* maxrung) {
 	const int& tid = threadIdx.x;
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
@@ -459,7 +459,7 @@ void tree_kick(int rung, float dt, float scale, int* nactive, int* maxrung) {
 				__syncthreads();
 				const tree& self = *(tree_base + leaf_list[myindex]);
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
-					if (sink->rung >= rung) {
+					if (sink->rung >= rung || sink->rung == -1) {
 						const auto& sink_x = sink->x;
 						const int count = min(other_cnt, OTHERSMAX);
 						for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
@@ -559,7 +559,7 @@ void tree_kick(int rung, float dt, float scale, int* nactive, int* maxrung) {
 				__syncthreads();
 				const tree& self = *(tree_base + leaf_list[myindex]);
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
-					if (sink->rung >= rung) {
+					if (sink->rung >= rung || sink->rung == -1) {
 						const auto& sink_x = sink->x;
 						const int count = min(other_cnt, OTHERSMAX);
 						for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
@@ -598,16 +598,16 @@ void tree_kick(int rung, float dt, float scale, int* nactive, int* maxrung) {
 			}
 		} while (!done);
 		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
-			if (p->rung >= rung) {
-				float dt0 = 0.5f / (1 << p->rung);
+			if (p->rung >= rung || p->rung == -1) {
+				float dt0 = p->rung == -1 ? 0.0 : (0.5f / (1 << p->rung));
 				const auto &f = F[p - self.part_begin];
 				float fmag2 = 0.f;
 				atomicAdd(nactive, 1);
 				for (int dim = 0; dim < NDIM; dim++) {
 					fmag2 += pow2(f[dim]);
 				}
-				const float dt = sqrtah * powf(fmag2, -0.25);
-				p->rung = max(-int(logf(dt) * log2inv + 1.0), min(p->rung - 1, rung));
+				const float dt = 0.2 * sqrtah * powf(fmag2, -0.25);
+				p->rung = max(-int(logf(dt) * log2inv - 1.0), min(p->rung - 1, rung));
 				float dt1 = 0.5f / (1 << p->rung);
 				for (int dim = 0; dim < NDIM; dim++) {
 					p->v[dim] += GM * f[dim] * (dt1 + dt0);
@@ -631,6 +631,12 @@ void tree_drift(particle* parts, double ainv, double dt) {
 		for (int dim = 0; dim < NDIM; dim++) {
 			double x = parts[i].x[dim].to_double();
 			x += ainv * dt * parts[i].v[dim];
+			while (x > 1.0) {
+				x -= 1.0;
+			}
+			while (x < 0.0) {
+				x += 1.0;
+			}
 			parts[i].x[dim].set(x);
 		}
 	}

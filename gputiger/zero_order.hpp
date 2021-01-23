@@ -43,12 +43,12 @@ class cosmos {
 	double omega_lam;
 	double H;
 public:
-	cosmos(double omega_c, double omega_b, double omega_gam, double omega_nu, double h_) {
+	cosmos(double omega_c, double omega_b, double omega_gam, double omega_nu, double h_, double a_) {
 		H = constants::H0 * h_;
 		omega_m = omega_c + omega_b;
 		omega_r = omega_gam + omega_nu;
 		omega_lam = 1.0 - omega_r - omega_m;
-		a = 1.0e-8;
+		a = a_;
 		t = tau = 0.0;
 	}
 	double advance(double dtau0) {

@@ -19,7 +19,7 @@ void transfer_data(particle* parts, particle* host_parts) {
 	const int N3 = N * N * N;
 	for (int i = tid; i < N3; i += TRANSFERSIZE) {
 		parts[i] = host_parts[i];
-		parts[i].rung = 0;
+		parts[i].rung = -1;
 		for (int dim = 0; dim < NDIM; dim++) {
 			parts[i].v[dim] *= a / opts.box_size;
 			parts[i].x[dim] /= opts.box_size;

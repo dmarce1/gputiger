@@ -42,7 +42,7 @@ __global__
 void root_tree_sort(void* dataspace, int space_size, particle* swap_space, particle* parts, int* cnt);
 
 __global__
-void tree_kick(int rung, float dt, float scale, int*, int*);
+void tree_kick(int rung, float scale, int*, int*);
 
 __global__
 void tree_drift(particle* parts, double ainv, double dt);

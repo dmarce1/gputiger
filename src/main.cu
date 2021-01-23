@@ -41,11 +41,11 @@ int main() {
 	CUDA_CHECK(cudaDeviceGetLimit(&recur_limit, cudaLimitDevRuntimeSyncDepth));
 	bool success = true;
 	if (stack_size != STACK_SIZE) {
-		printf("Unable to allocate stack size of %li\n", STACK_SIZE);
+		printf("Unable to allocate stack size of %i\n", STACK_SIZE);
 		success = false;
 	}
 	if (heap_size != HEAP_SIZE) {
-		printf("Unable to allocate heap size of %li\n", HEAP_SIZE);
+		printf("Unable to allocate heap size of %i\n", HEAP_SIZE);
 		success = false;
 	}
 	if (recur_limit != KERNEL_DEPTH) {
@@ -58,7 +58,7 @@ int main() {
 
 	options opts;
 	opts.Nmp = 100;
-	opts.redshift = 75.0;
+	opts.redshift = 20.0;
 	opts.h = 0.7;
 	opts.Neff = 3.046;
 	opts.Y = 0.24;
@@ -73,7 +73,7 @@ int main() {
 	opts.nout = 64;
 	opts.max_kernel_depth = KERNEL_DEPTH - 1;
 	opts.parts_per_bucket = 64;
-	opts.opening_crit = 0.7;
+	opts.opening_crit = 0.5;
 	opts.particle_mass = 1.0;
 	opts.nparts = opts.Ngrid * opts.Ngrid * opts.Ngrid;
 	opts.hsoft = 1.0f / (opts.Ngrid * 50.0);
@@ -82,8 +82,6 @@ int main() {
 			* std::pow(constants::c, -3) * std::pow(2.73 * opts.Theta, 4) * std::pow(opts.h, -2);
 	opts.omega_nu = omega_r * opts.Neff / (8.0 / 7.0 * std::pow(11.0 / 4.0, 4.0 / 3.0) + opts.Neff);
 	opts.omega_gam = omega_r - opts.omega_nu;
-
-
 
 	printf("Computing Ewald tables\n");
 	ewald_table_t* etable;
@@ -148,16 +146,15 @@ int main() {
 	fclose(fp);
 
 	int* parts_processed;
-	double a = 1.f / (opts.redshift + 1.f);
 	int* leaf_count;
 	int rung = 0;
 	int* maxrung;
 	CUDA_MALLOC_MANAGED(&parts_processed, sizeof(int));
 	CUDA_MALLOC_MANAGED(&leaf_count, sizeof(int));
 	CUDA_MALLOC_MANAGED(&maxrung, sizeof(int));
-	return 1;
-	do {
+	cosmos C(opts.omega_c, opts.omega_c, opts.omega_gam, opts.omega_nu, opts.h, 1.0 / (opts.redshift + 1.0));
 
+	do {
 		sort_time.start();
 		printf("\tSorting\n");
 		root_tree_sort<<<1,TREESORTSIZE>>>(arena + 8*sizeof(float)*N3, TREESPACE*sizeof(float)*N3, parts_ptr, (particle*) arena, leaf_count);
@@ -173,15 +170,23 @@ int main() {
 		dim.z = 1;
 		*parts_processed = 0.0;
 		*maxrung = 0;
-		tree_kick<<<dim,KICKWARPSIZE>>>(rung,dtau, a,parts_processed,maxrung);
+		tree_kick<<<dim,KICKWARPSIZE>>>(rung, C.scale(),parts_processed,maxrung);
 		CUDA_CHECK(cudaDeviceSynchronize());
+		rung = *maxrung;
 		printf("\t\tKick took %e seconds\n", kick_time.stop());
 		printf("\tScience Rate = %e pps\n", *parts_processed / (kick_time.result() + sort_time.result()));
+
+		double dtau = 1.0 / (1 << rung);
+		printf("%e %e %e %i %i\n", C.time(), dtau, C.scale(), rung, *parts_processed);
+		double a0 = C.scale();
+		C.advance(dtau);
+		double a1 = C.scale();
+		double ainv = 0.5 / a1 + 0.5 / a0;
 
 		time.start();
 		printf("\t\tDrifting\n");
 		int nblocks = (N3 - 1) / (opts.parts_per_bucket * DRIFTSIZE) + 1;
-		tree_drift<<<nblocks,DRIFTSIZE>>>((particle*)arena,1.0/C.scale(),dtau);
+		tree_drift<<<nblocks,DRIFTSIZE>>>((particle*)arena,ainv,dtau);
 		CUDA_CHECK(cudaDeviceSynchronize());
 		printf("\t\tDrift took %e seconds\n", time.stop());
 
