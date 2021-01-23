@@ -2,7 +2,7 @@
 #include <gputiger/math.hpp>
 
 __device__
-                                                                                                                                        static tree* tree_base;
+                                                                                                                                          static tree* tree_base;
 
 __device__
 static int next_index;
@@ -20,7 +20,7 @@ __device__
 static int leaf_count;
 
 __device__
-                     static ewald_table_t* etable;
+                       static ewald_table_t* etable;
 
 __device__ cudaTextureObject_t* tex_ewald;
 
@@ -353,7 +353,7 @@ struct direct_t {
 #define OTHERSMAX 256
 
 __global__
-void tree_kick(int rung, float dt, double* nactive) {
+void tree_kick(int rung, float dt, float scale, int* nactive, int* maxrung) {
 	const int& tid = threadIdx.x;
 	const int& yi = blockIdx.x;
 	const int& xi = blockIdx.y;
@@ -386,6 +386,9 @@ void tree_kick(int rung, float dt, double* nactive) {
 	}
 	__syncthreads();
 	if (myindex < leaf_count) {
+		const float sqrtah = sqrtf(opts.h * scale);
+		const float log2inv = 1.f / logf(2.f);
+		const float GM = opts.particle_mass;
 		int depth;
 		const tree& self = *(tree_base + leaf_list[myindex]);
 		tree* pointers[MAXDEPTH];
@@ -493,66 +496,7 @@ void tree_kick(int rung, float dt, double* nactive) {
 				__syncthreads();
 			}
 		} while (!done);
-		const float GM = opts.particle_mass * opts.G;
-		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
-			if (p->rung >= rung) {
-				for (int dim = 0; dim < NDIM; dim++) {
-					p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
-				}
-			}
-		}
-	}
-}
-
-#define OTHERSMAX2 128
-
-__global__
-void tree_kick_ewald(int rung, float dt, double* nactive) {
-	const int& tid = threadIdx.x;
-	const int& yi = blockIdx.x;
-	const int& xi = blockIdx.y;
-	const int myindex = (gridDim.x * xi + yi);
-	__shared__ float h2;
-	__shared__ float dewald;
-	bool opened;
-	__shared__ array<array<float, NDIM>, PARTMAX> F;
-	__shared__ array<array<fixed32, NDIM>, OTHERSMAX2> others1;
-	__shared__ array<array<fixed32, NDIM>, OTHERSMAX2> others2;
-	__shared__ bool swtch;
-	__shared__ array<fixed32, NDIM>* others;
-	__shared__ array<fixed32, NDIM>* next_others;
-	__shared__ int other_cnt;
-	if (tid == 0) {
-		swtch = false;
-		others = others1.data();
-		next_others = others2.data();
 		other_cnt = 0;
-		h2 = opts.hsoft * opts.hsoft;
-		dewald = EWALD_DIM - 1.0f;
-	}
-	__syncthreads();
-	int ndirect = 0;
-	int nindirect = 0;
-	for (int i = tid; i < PARTMAX; i += KICKWARPSIZE) {
-		for (int dim = 0; dim < NDIM; dim++) {
-			F[i][dim] = float(0);
-		}
-	}
-	__syncthreads();
-	if (myindex < leaf_count) {
-		int depth;
-		const tree& self = *(tree_base + leaf_list[myindex]);
-		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
-			if (p->rung >= rung) {
-				atomicAdd(nactive,1);
-			}
-		}
-		tree* pointers[MAXDEPTH];
-		int child_indexes[MAXDEPTH];
-		float self_r = self.pole.radius;
-		bool done;
-		array<fixed32, NDIM> self_x = self.pole.xcom;
-
 		done = false;
 		for (int i = 0; i < MAXDEPTH; i++) {
 			child_indexes[i] = 0;
@@ -578,10 +522,10 @@ void tree_kick_ewald(int rung, float dt, double* nactive) {
 				for (auto* source = other.part_begin + tid; source < other.part_end; source += KICKWARPSIZE) {
 					const auto source_x = source->x;
 					int index = atomicAdd(&other_cnt, 1);
-					if (index < OTHERSMAX2) {
+					if (index < OTHERSMAX) {
 						others[index] = source_x;
 					} else {
-						next_others[index - OTHERSMAX2] = source_x;
+						next_others[index - OTHERSMAX] = source_x;
 					}
 				}
 			} else {
@@ -611,13 +555,13 @@ void tree_kick_ewald(int rung, float dt, double* nactive) {
 				done = true;
 			}
 			__syncthreads();
-			if (other_cnt >= OTHERSMAX2 || done) {
+			if (other_cnt >= OTHERSMAX || done) {
 				__syncthreads();
 				const tree& self = *(tree_base + leaf_list[myindex]);
 				for (auto* sink = self.part_begin; sink < self.part_end; sink++) {
 					if (sink->rung >= rung) {
 						const auto& sink_x = sink->x;
-						const int count = min(other_cnt, OTHERSMAX2);
+						const int count = min(other_cnt, OTHERSMAX);
 						for (int oi = tid; oi < count; oi += KICKWARPSIZE) {
 							array<float, NDIM> X;
 							array<float, NDIM> absX;
@@ -631,7 +575,7 @@ void tree_kick_ewald(int rung, float dt, double* nactive) {
 								const float z0 = absX[2] * dewald + 0.5;
 								for (int dim = 0; dim < NDIM; dim++) {
 									float tmp = tex3D<float>(tex_ewald[dim], x0, y0, z0);
-									F[index][dim] += tmp;
+									F[index][dim] += copysignf(tmp, X[dim]);
 								}
 
 							}
@@ -640,7 +584,7 @@ void tree_kick_ewald(int rung, float dt, double* nactive) {
 				}
 				__syncthreads();
 				if (tid == 0) {
-					other_cnt -= OTHERSMAX2;
+					other_cnt -= OTHERSMAX;
 					swtch = !swtch;
 					if (swtch) {
 						others = others2.data();
@@ -653,13 +597,21 @@ void tree_kick_ewald(int rung, float dt, double* nactive) {
 				__syncthreads();
 			}
 		} while (!done);
-		const float GM = opts.particle_mass * opts.G;
 		for (auto* p = self.part_begin + tid; p < self.part_end; p += KICKWARPSIZE) {
 			if (p->rung >= rung) {
+				const auto &f = F[p - self.part_begin];
+				float fmag2 = 0.f;
+				atomicAdd(nactive, 1);
 				for (int dim = 0; dim < NDIM; dim++) {
-					p->v[dim] += GM * F[p - self.part_begin][dim] * dt;
+					const float this_f = f[dim];
+					p->v[dim] += GM * this_f * dt;
+					fmag2 += this_f * this_f;
 				}
+				const float dt = sqrtah * powf(fmag2, -0.25);
+				p->rung = max(-int(logf(dt) * log2inv + 1.0), min(p->rung - 1, rung));
+				atomicMax(maxrung,p->rung);
 			}
 		}
 	}
 }
+

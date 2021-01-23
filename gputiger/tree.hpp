@@ -42,9 +42,6 @@ __global__
 void root_tree_sort(void* dataspace, int space_size, particle* swap_space, particle* parts, int* cnt);
 
 __global__
-void tree_kick(int rung, float dt, double* flops);
-
-__global__
-void tree_kick_ewald(int rung, float dt, double* flops);
+void tree_kick(int rung, float dt, float scale, int*, int*);
 
 #endif /* TREE_HPP_ */

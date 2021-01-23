@@ -57,11 +57,11 @@ int main() {
 
 	options opts;
 	opts.redshift = 20.0;
-	opts.h = 0.697;
-	opts.Neff = 3.84;
+	opts.h = 0.7;
+	opts.Neff = 3.15;
 	opts.Y = 0.24;
-	opts.omega_b = 0.0240 / (opts.h * opts.h);
-	opts.omega_c = 0.1146 / (opts.h * opts.h);
+	opts.omega_b = 0.05;
+	opts.omega_c = 0.25;
 	opts.Theta = 1.0;
 	opts.Ngrid = 256;
 	opts.sigma8 = 0.8367;
@@ -73,9 +73,8 @@ int main() {
 	opts.parts_per_bucket = 64;
 	opts.opening_crit = 0.7;
 	opts.particle_mass = 1.0;
-	opts.G = 1.0;
 	opts.nparts = opts.Ngrid * opts.Ngrid * opts.Ngrid;
-	opts.hsoft = opts.Ngrid / 50.0;
+	opts.hsoft = 1.0f / (opts.Ngrid *50.0);
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + opts.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * opts.Theta, 4) * std::pow(opts.h, -2);
@@ -127,11 +126,15 @@ int main() {
 	initialize<<<1, 1>>>(arena, parts_ptr, opts, host_ewald);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
-	double* parts_processed;
-	double dt = 0.f;
-	int* leaf_count, rung = 0;
-	CUDA_MALLOC_MANAGED(&parts_processed, sizeof(double));
+	int* parts_processed;
+	float dt = 0.f;
+	float a = 1.f / (opts.redshift + 1.f);
+	int* leaf_count;
+	int rung = 0;
+	int* maxrung;
+	CUDA_MALLOC_MANAGED(&parts_processed, sizeof(int));
 	CUDA_MALLOC_MANAGED(&leaf_count, sizeof(int));
+	CUDA_MALLOC_MANAGED(&maxrung, sizeof(int));
 
 	printf("\nEntering main execution loop.\n");
 
@@ -149,11 +152,12 @@ int main() {
 	dim.x = dim.y = block_size;
 	dim.z = 1;
 	*parts_processed = 0.0;
-	tree_kick<<<dim,KICKWARPSIZE>>>(rung,dt, parts_processed);
-	tree_kick_ewald<<<dim,KICKEWALDWARPSIZE>>>(rung,dt, parts_processed);
+	*maxrung = 0;
+	tree_kick<<<dim,KICKWARPSIZE>>>(rung,dt, a,parts_processed,maxrung);
 	CUDA_CHECK(cudaDeviceSynchronize());
 	printf("\t\tKick took %e seconds\n", kick_time.stop());
 	printf("\tScience Rate = %e pps\n", *parts_processed / (kick_time.result() + sort_time.result()));
+	printf("%i\n", *maxrung);
 
 	return 0;
 }
