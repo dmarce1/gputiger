@@ -56,6 +56,7 @@ int main() {
 	}
 
 	options opts;
+	opts.Nmp = 100;
 	opts.redshift = 20.0;
 	opts.h = 0.7;
 	opts.Neff = 3.15;
@@ -64,7 +65,7 @@ int main() {
 	opts.omega_c = 0.25;
 	opts.Theta = 1.0;
 	opts.Ngrid = 256;
-	opts.sigma8 = 0.8367;
+	opts.sigma8 = 0.95;
 	opts.max_overden = 1.0;
 	opts.box_size = 1000; //613.0 *opts.Ngrid/2160.0;
 	//	opts.box_size = 613.0 / 2160.0 * opts.Ngrid;
@@ -74,7 +75,7 @@ int main() {
 	opts.opening_crit = 0.7;
 	opts.particle_mass = 1.0;
 	opts.nparts = opts.Ngrid * opts.Ngrid * opts.Ngrid;
-	opts.hsoft = 1.0f / (opts.Ngrid *50.0);
+	opts.hsoft = 1.0f / (opts.Ngrid * 50.0);
 	double omega_r = 32.0 * M_PI / 3.0 * constants::G * constants::sigma
 			* (1 + opts.Neff * (7. / 8.0) * std::pow(4. / 11., 4. / 3.)) * std::pow(constants::H0, -2)
 			* std::pow(constants::c, -3) * std::pow(2.73 * opts.Theta, 4) * std::pow(opts.h, -2);
@@ -118,13 +119,30 @@ int main() {
 	printf("Setting up initial conditions for a red shift of %f\n", opts.redshift);
 	particle* parts_ptr;
 	void* arena;
+	float* matter_power;
+	float* vel_power;
 	const int N = opts.Ngrid;
 	const int N3 = N * N * N;
 	size_t arena_size = (8 + TREESPACE) * sizeof(float) * N3;
 	CUDA_MALLOC_MANAGED(&parts_ptr, sizeof(particle) * N3);
 	CUDA_MALLOC_MANAGED(&arena, arena_size);
-	initialize<<<1, 1>>>(arena, parts_ptr, opts, host_ewald);
+	CUDA_MALLOC_MANAGED(&matter_power, sizeof(opts.Nmp));
+	CUDA_MALLOC_MANAGED(&vel_power, sizeof(opts.Nmp));
+	initialize<<<1, 1>>>(arena, parts_ptr, opts, host_ewald, matter_power, vel_power);
 	CUDA_CHECK(cudaDeviceSynchronize());
+	double kmin = 1e-4;
+	double kmax = 5;
+	double dlogk = logf(kmax / kmin) / (100 - 1);
+	FILE* fp = fopen("power.dat", "wt");
+	if (fp == nullptr) {
+		printf("Unable to open power.dat for writing\n");
+		return -2;
+	}
+	for (int i = 0; i < 100; i++) {
+		float k = expf(logf(1e-4*opts.h) + dlogk * i);
+		fprintf(fp, "%10.4e %10.4e %10.4e\n", k, matter_power[i], vel_power[i]);
+	}
+	fclose(fp);
 
 	int* parts_processed;
 	float dt = 0.f;

@@ -21,7 +21,7 @@ struct interp_functor {
 	T dloga;
 	__device__
 	T operator()(T a) const {
-		T loga = log(a);
+		T loga = logf(a);
 		if (loga < minloga || loga > maxloga) {
 			printf("Error in interpolation_function out of range %e %e %e\n", a, amin, amax);
 		}

@@ -154,7 +154,8 @@ void integrate(FUNC *fptr, REAL a, REAL b, REAL* result, REAL toler) {
 			REAL this_f = f(x);
 			sum2 += this_f * dx * wt2[i % 6] * (i == 0 || i == N - 1 ? REAL(0.5) : REAL(1));
 			sum1 += this_f * dx * wt1[i % 3] * (i == 0 || i == N - 1 ? REAL(0.5) : REAL(1));
-		}
+	//		printf( "%e %e\n", exp(x), this_f);
+					}
 		sums1[thread] = sum1;
 		sums2[thread] = sum2;
 		__syncthreads();

@@ -71,6 +71,7 @@
 
 
 struct options {
+	float Nmp;
 	double code_to_cm;
 	double code_to_g;
 	double code_to_s;

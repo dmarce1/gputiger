@@ -11,7 +11,7 @@
 #include <gputiger/particle.hpp>
 
 __global__
-void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr);
+void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr, float* matterpow, float*);
 
 
 

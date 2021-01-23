@@ -69,7 +69,7 @@ __device__
             extern cudaTextureObject_t* tex_ewald;
 
 __global__
-void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr) {
+void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObject_t* ewald_ptr, float* matterpow, float* velpow) {
 	const int tid = threadIdx.x;
 	if (tid == 0) {
 		tex_ewald = ewald_ptr;
@@ -80,11 +80,12 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		cmplx* phi = (cmplx*) arena;
 		cmplx* rands = ((cmplx*) arena) + N3;
 		particle* parts = (particle*) arena;
-		float kmin = 2.0 * (float) M_PI / opts.box_size;
-		float kmax = sqrtf(3) * (kmin * (float) (opts.Ngrid / 2));
-		int Nk = 2 * opts.Ngrid * SQRT(3);
+		float kmin;
+		float kmax;
+		float dk;
+		float kmin0;
+		float kmax0;
 		float vmax, xdisp;
-
 		float normalization;
 		float *result_ptr;
 		zero_order_universe *zeroverse_ptr;
@@ -93,6 +94,16 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		interp_functor<float>* vel_k;
 		cos_state* states;
 		cmplx* basis;
+
+		kmin = 2.0 * (float) M_PI / opts.box_size;
+		kmax = sqrtf(3) * (kmin * (float) (opts.Ngrid));
+		kmin0 = (1e-4 * opts.h);
+		kmax0 = (5 * opts.h);
+		dk = min(logf(kmax/kmin), 5/(1e-4)) / opts.Ngrid;
+		kmin = min(kmin0,kmin);
+		kmax = max(kmax0,kmax);
+		int Nk = fmaxf(logf(kmax/kmin) / dk + 1, (float) opts.Nmp);
+
 
 		CUDA_MALLOC(&zeroverse_ptr, sizeof(zero_order_universe));
 		CUDA_MALLOC(&result_ptr, sizeof(float));
@@ -108,7 +119,7 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		func_ptr->uni = zeroverse_ptr;
 		func_ptr->littleh = opts.h;
 		integrate<sigma8_integrand, float> <<<1, SIGMA8SIZE>>>(func_ptr,
-				(float) LOG(0.25 / sqrtf(1000) * opts.h), (float) LOG(0.25 * sqrtf(1000) * opts.h), result_ptr, (float) 1.0e-6);
+				(float) LOG(0.25 / 128 * opts.h), (float) LOG(0.25 * 65 * opts.h), result_ptr, (float) 1.0e-6);
 		CUDA_CHECK(cudaDeviceSynchronize());
 		*result_ptr = SQRT(opts.sigma8 * opts.sigma8 / *result_ptr);
 		normalization = *result_ptr;
@@ -120,6 +131,14 @@ void initialize(void* arena, particle* host_parts, options opts_, cudaTextureObj
 		int block_size = max(EBSIZE, Nk);
 		einstein_boltzmann_interpolation_function<<<1, block_size>>>(den_k, vel_k, states, zeroverse_ptr, kmin, kmax, normalization, Nk, zeroverse_ptr->amin, ainit);
 		CUDA_CHECK(cudaDeviceSynchronize());
+
+		Nk = opts.Nmp;
+		dk = logf(kmax0/kmin0) / (Nk-1);
+		for( int i = 0; i < Nk; i++) {
+			float logk = log(kmin0) + i * dk;
+			matterpow[i] = (*den_k)(expf(logk));
+			velpow[i] = (*vel_k)(expf(logk));
+		}
 
 		printf("\tComputing FFT basis\n");
 		fft_basis<<<1,FFTSIZE>>>(basis, opts.Ngrid);
